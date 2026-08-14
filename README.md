@@ -10,6 +10,10 @@ It uses an architecture where **everything is a plugin**, and is powered by [Cor
 
 DeepSeek Harness is currently in _developer preview_ and is iterating rapidly. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**
 
+## Windows desktop
+
+This repository also carries an unofficial Windows desktop distribution with a native WebView2 window, a separate CONFIG application, Full and Lite Setup packages, and a portable ZIP. Download published builds from the [desktop releases](https://github.com/Iraryi/deepseek-harness-desktop/releases) or read the [Windows reference](windows/README.md).
+
 ## Run
 
 ### Run from `npm`

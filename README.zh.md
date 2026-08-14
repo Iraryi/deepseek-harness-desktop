@@ -10,6 +10,10 @@ DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的�
 
 DeepSeek Harness 目前处于 _开发者预览_ 阶段，正在快速迭代。**未来将出现破坏兼容性的变更。**
 
+## Windows 桌面版
+
+本仓库还提供非官方 Windows 桌面发行版，包括原生 WebView2 窗口、独立 CONFIG 程序、Full 与 Lite 安装包和便携 ZIP。可从[桌面版 Releases](https://github.com/Iraryi/deepseek-harness-desktop/releases)下载成品，或阅读 [Windows 参考文档](windows/README.md)。
+
 ## 运行
 
 ### 通过 `npm` 运行
