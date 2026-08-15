@@ -135,5 +135,22 @@ finally {
             Stop-Process -Id $remainingNode.ProcessId -Force -ErrorAction SilentlyContinue
         }
     }
-    if (Test-Path $smokePath) { Remove-Item -LiteralPath $smokePath -Recurse -Force }
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.ExecutablePath -and
+        $_.ExecutablePath.StartsWith($smokePath + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)
+    } | ForEach-Object {
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    for ($attempt = 0; $attempt -lt 20 -and (Test-Path $smokePath); $attempt++) {
+        try {
+            Remove-Item -LiteralPath $smokePath -Recurse -Force -ErrorAction Stop
+        }
+        catch {
+            if ($attempt -eq 19) {
+                Write-Warning "Portable smoke directory could not be removed: $smokePath ($($_.Exception.Message))"
+                break
+            }
+            Start-Sleep -Milliseconds 500
+        }
+    }
 }
