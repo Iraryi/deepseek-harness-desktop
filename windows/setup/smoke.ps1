@@ -63,65 +63,106 @@ function Test-InstalledRuntime([string]$App) {
     }
 }
 
+function Stop-SmokeProcessTree($AppProcess, [string]$App) {
+    if ($AppProcess) {
+        try { $AppProcess.Refresh() } catch {}
+        if (-not $AppProcess.HasExited) {
+            $AppProcess.CloseMainWindow() | Out-Null
+            if (-not $AppProcess.WaitForExit(10000)) {
+                & taskkill.exe /PID $AppProcess.Id /T /F | Out-Null
+            }
+        }
+    }
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.ExecutablePath -and
+        $_.ExecutablePath.StartsWith($App + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)
+    } | ForEach-Object {
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Milliseconds 500
+}
+
 function Start-InstalledAppSmoke([string]$App, [string]$ConfigPath) {
-    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+    $previousScope = $env:DEEPSEEK_HARNESS_INSTANCE_SCOPE
+    $failures = @()
     try {
-        $listener.Start()
-        $port = ([Net.IPEndPoint]$listener.LocalEndpoint).Port
-    }
-    finally {
-        $listener.Stop()
-    }
-
-    $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
-    $config.FirstRunCompleted = $true
-    $config.Port = $port
-    $config.Url = "http://127.0.0.1:$port"
-    $config.LoadingStyle = 'off'
-    $config.CloseAction = 'exit'
-    $config.LaunchMode = 'window'
-    [IO.File]::WriteAllText($ConfigPath, ($config | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
-
-    $appProcess = Start-Process (Join-Path $App 'dsh.exe') -WorkingDirectory $App -PassThru
-    try {
-        $nodeProcess = $null
-        $response = $null
-        for ($attempt = 0; $attempt -lt 180; $attempt++) {
-            Start-Sleep -Milliseconds 500
-            $appProcess.Refresh()
-            if ($appProcess.HasExited) { break }
-            $nodeProcess = Get-CimInstance Win32_Process | Where-Object {
-                $_.Name -eq 'node.exe' -and $_.ParentProcessId -eq $appProcess.Id
-            } | Select-Object -First 1
+        for ($launchAttempt = 1; $launchAttempt -le 3; $launchAttempt++) {
+            $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
             try {
-                $response = Invoke-WebRequest "http://127.0.0.1:$port" -UseBasicParsing -TimeoutSec 2
-                if ($response.StatusCode -eq 200) { break }
+                $listener.Start()
+                $port = ([Net.IPEndPoint]$listener.LocalEndpoint).Port
             }
-            catch {
+            finally {
+                $listener.Stop()
             }
-        }
-        if (-not $response -or $response.StatusCode -ne 200) { throw "Installed application did not reach HTTP 200 on port $port" }
-        if (-not $nodeProcess) { throw 'Installed application did not start its bundled Node process' }
-        $expectedNode = Join-Path $App 'runtime\tools\node\node.exe'
-        if (-not $nodeProcess.ExecutablePath.Equals($expectedNode, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "Installed application used the wrong Node: $($nodeProcess.ExecutablePath)"
-        }
-        return [pscustomobject]@{
-            HttpStatus = $response.StatusCode
-            Port = $port
-            BundledNode = $nodeProcess.ExecutablePath
-            NodeWindowHandle = (Get-Process -Id $nodeProcess.ProcessId).MainWindowHandle
-            DesktopPatch = $nodeProcess.CommandLine -match '--patch'
+
+            $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+            $config.FirstRunCompleted = $true
+            $config.Port = $port
+            $config.Url = "http://127.0.0.1:$port"
+            $config.LoadingStyle = 'off'
+            $config.CloseAction = 'exit'
+            $config.LaunchMode = 'window'
+            [IO.File]::WriteAllText($ConfigPath, ($config | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
+
+            $env:DEEPSEEK_HARNESS_INSTANCE_SCOPE = 'setup-smoke-' + [Guid]::NewGuid().ToString('N')
+            $appProcess = $null
+            $nodeProcess = $null
+            $response = $null
+            $lastWebError = $null
+            try {
+                $appProcess = Start-Process (Join-Path $App 'dsh.exe') -WorkingDirectory $App -PassThru
+                for ($attempt = 0; $attempt -lt 180; $attempt++) {
+                    Start-Sleep -Milliseconds 500
+                    $appProcess.Refresh()
+                    if ($appProcess.HasExited) { break }
+                    $nodeProcess = Get-CimInstance Win32_Process | Where-Object {
+                        $_.Name -eq 'node.exe' -and $_.ParentProcessId -eq $appProcess.Id
+                    } | Select-Object -First 1
+                    try {
+                        $response = Invoke-WebRequest "http://127.0.0.1:$port" -UseBasicParsing -TimeoutSec 2
+                        if ($response.StatusCode -eq 200) { break }
+                    }
+                    catch {
+                        $lastWebError = $_.Exception.Message
+                    }
+                }
+
+                if ($response -and $response.StatusCode -eq 200) {
+                    if (-not $nodeProcess) { throw 'Installed application did not start its bundled Node process' }
+                    $expectedNode = Join-Path $App 'runtime\tools\node\node.exe'
+                    if (-not $nodeProcess.ExecutablePath.Equals($expectedNode, [StringComparison]::OrdinalIgnoreCase)) {
+                        throw "Installed application used the wrong Node: $($nodeProcess.ExecutablePath)"
+                    }
+                    return [pscustomobject]@{
+                        HttpStatus = $response.StatusCode
+                        Port = $port
+                        BundledNode = $nodeProcess.ExecutablePath
+                        NodeWindowHandle = (Get-Process -Id $nodeProcess.ProcessId).MainWindowHandle
+                        DesktopPatch = $nodeProcess.CommandLine -match '--patch'
+                    }
+                }
+
+                $processState = if ($appProcess.HasExited) { "exited=$($appProcess.ExitCode)" } else { 'running' }
+                $nodeState = if ($nodeProcess) { "node=$($nodeProcess.ProcessId)" } else { 'node=missing' }
+                $failure = "attempt=$launchAttempt port=$port app=$processState $nodeState web=$lastWebError"
+                $failures += $failure
+                Write-Warning "Installed application smoke retry: $failure"
+                $logRoot = Join-Path $App 'data\logs'
+                Get-ChildItem -LiteralPath $logRoot -File -ErrorAction SilentlyContinue | ForEach-Object {
+                    Write-Warning "Log tail: $($_.FullName)"
+                    Get-Content -LiteralPath $_.FullName -Tail 40 -ErrorAction SilentlyContinue | ForEach-Object { Write-Warning $_ }
+                }
+            }
+            finally {
+                Stop-SmokeProcessTree $appProcess $App
+            }
         }
     }
     finally {
-        if (-not $appProcess.HasExited) {
-            $appProcess.CloseMainWindow() | Out-Null
-            if (-not $appProcess.WaitForExit(10000)) {
-                & taskkill.exe /PID $appProcess.Id /T /F | Out-Null
-            }
-        }
+        $env:DEEPSEEK_HARNESS_INSTANCE_SCOPE = $previousScope
     }
+    throw "Installed application did not reach HTTP 200 after 3 attempts: $($failures -join '; ')"
 }
 
 $fullResult = $null
