@@ -312,6 +312,7 @@ export function sendSetupDesktopCommand(command: SetupDesktopCommand): boolean {
 /**
  * Ask the desktop launcher to install one already displayed manifest.
  * @param manifest - validated manifest whose evidence is already visible in HUB.
+ * @param onProgress - optional listener for native installation progress updates.
  * @returns the desktop launcher's final installation message.
  */
 export function installThroughDesktop(manifest: SetupManifest, onProgress?: (progress: HubInstallProgress) => void): Promise<string> {
@@ -350,6 +351,7 @@ export function installThroughDesktop(manifest: SetupManifest, onProgress?: (pro
  * Send a typed request to the native HUB owner.
  * @param operation - operation performed outside the browser sandbox.
  * @param payload - JSON-compatible operation input.
+ * @param options - timeout and progress callbacks for the native request.
  * @returns operation-specific response data.
  */
 export function requestHubThroughDesktop<T>(

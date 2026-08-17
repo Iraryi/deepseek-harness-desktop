@@ -177,6 +177,14 @@ This checkpoint is complete. The current implementation has a functional native 
 
 ## Known risks and incomplete evidence
 
+## Published HUB release checkpoint
+
+- Public HUB Release `v0.1.0-rc.5`: `https://github.com/Iraryi/deepseek-harness-hub/releases/tag/v0.1.0-rc.5`.
+- The release contains Full Setup, Lite Setup, Runtime ZIP, Portable ZIP, the PowerShell installer, release notes, the release manifest, and SHA-256 checksums. Remote asset sizes and GitHub SHA-256 digests match the locally built artifacts.
+- The two cataloged standalone Setup URLs resolve to the published HUB release and match their declared byte counts and SHA-256 values.
+- The HUB catalog source entries pin desktop implementation commit `4af6b2a0abdff7684695639ebab84e66b8e6743f`; the older desktop `v0.1.0-rc.5` tag remains unchanged because it already has a public release.
+- HUB Registry validation passes on the published catalog commit. Desktop CI, Landlock, Sandbox, and both release workflows pass for the implementation commit; documentation deployment is being repaired for stale generated catalog, JSDoc, and README pairing gates.
+
 - `artifacts/legacy-profile-recovery-a19206059f01` and `artifacts/latest-legacy-profile-recovery.json` remain as an inert 427,209,499-byte isolated test copy and descriptor. No process references the directory, but the host command policy rejected recursive deletion after the absolute path was verified under the repository `artifacts` root.
 - Five failed `dsh-dshmk-install-smoke-*` directories remain under the system temporary directory from intermediate harness failures. They total approximately 196 MB, match the smoke's fixed name pattern, and have no referencing process; the host command policy rejected their verified recursive deletion.
 - One 563-byte `dshmk-catalog-smoke-8a0eba30774343d48e381b62e724f7e4` directory remains from the PowerShell Core stack-overflow run. It contains only the synthetic stale catalog and generated HUB data, has no referencing process, and the host command policy rejected its verified recursive deletion.

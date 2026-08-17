@@ -1,6 +1,9 @@
 import type { HubCommunityPlugin, HubCommunityRegistry, HubGitHubRepository } from './bridge.ts'
 
+/** Supported ordering modes for community discovery results. */
 export type CommunitySort = 'recommended' | 'stars' | 'newest' | 'name'
+
+/** Supported age windows for community discovery results. */
 export type CommunityTimeRange = 'all' | 'week' | 'month' | 'quarter' | 'year'
 
 const RANGE_DAYS: Readonly<Record<Exclude<CommunityTimeRange, 'all'>, number>> = {
@@ -10,6 +13,12 @@ const RANGE_DAYS: Readonly<Record<Exclude<CommunityTimeRange, 'all'>, number>> =
   year: 365,
 }
 
+/**
+ * Filter and order the community registry for one visible marketplace page.
+ * @param registry - normalized community plugin registry.
+ * @param options - active category, locale, query, ordering, and age window.
+ * @returns matching plugins in the requested display order.
+ */
 export function visibleCommunityPlugins(
   registry: HubCommunityRegistry,
   options: {
@@ -46,12 +55,23 @@ export function visibleCommunityPlugins(
   })
 }
 
+/**
+ * Count available community plugins by category.
+ * @param registry - normalized community plugin registry.
+ * @returns category names mapped to plugin counts.
+ */
 export function communityCategoryCounts(registry: HubCommunityRegistry): ReadonlyMap<string, number> {
   const counts = new Map<string, number>()
   for (const plugin of registry.plugins) counts.set(plugin.category, (counts.get(plugin.category) ?? 0) + 1)
   return counts
 }
 
+/**
+ * Build compact pagination items around the active page.
+ * @param current - one-based active page number.
+ * @param total - total number of pages.
+ * @returns page numbers and ellipsis separators for display.
+ */
 export function communityPageItems(current: number, total: number): readonly (number | '…')[] {
   if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1)
   const items: Array<number | '…'> = [1]
@@ -66,10 +86,20 @@ export function communityPageItems(current: number, total: number): readonly (nu
   return items
 }
 
+/**
+ * Report whether a community entry has a direct npm installation target.
+ * @param plugin - community plugin entry to inspect.
+ * @returns true when the entry supports one-click installation.
+ */
 export function communitySupportsOneClick(plugin: HubCommunityPlugin): boolean {
   return typeof plugin.npm === 'string' && plugin.npm.trim().length > 0
 }
 
+/**
+ * Convert a community entry into the shared GitHub repository representation.
+ * @param plugin - community plugin entry to convert.
+ * @returns repository data used by HUB details and Setup preparation.
+ */
 export function communityRepository(plugin: HubCommunityPlugin): HubGitHubRepository {
   const fullName = `${plugin.owner}/${plugin.name}`
   return {
