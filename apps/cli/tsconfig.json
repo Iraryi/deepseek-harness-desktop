@@ -30,6 +30,9 @@
       "path": "../../packages/bundle/headless"
     },
     {
+      "path": "../../packages/bundle/full-capability-pack"
+    },
+    {
       "path": "../../packages/bundle/web-app"
     },
     {
@@ -55,6 +58,9 @@
     },
     {
       "path": "../../packages/util/home-paths"
+    },
+    {
+      "path": "../../packages/setup/protocol"
     },
     {
       "path": "../../packages/mcp/mcp-client"

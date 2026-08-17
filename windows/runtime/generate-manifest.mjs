@@ -55,6 +55,7 @@ const output = `${JSON.stringify({
   version: repositoryManifest.version,
   private: true,
   type: 'module',
+  files: [],
   dependencies: Object.fromEntries([...runtimeDependencies].sort().map(name => [name, 'workspace:^'])),
 }, null, 2)}\n`
 const manifestPath = join(runtimeDir, 'package.json')

@@ -51,10 +51,13 @@ try {
 
     $required = @(
         'dsh.exe',
+        'dsh-hub.exe',
         'dsh-config.exe',
         'portable.mode',
         'runtime\runtime-manifest.json',
-        'runtime\tools\node\node.exe'
+        'runtime\tools\node\node.exe',
+        'runtime\tools\node\npm.cmd',
+        'runtime\tools\node\node_modules\npm\bin\npm-cli.js'
     )
     foreach ($relativePath in $required) {
         if (-not (Test-Path (Join-Path $smokePath $relativePath))) {

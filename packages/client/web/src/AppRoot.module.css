@@ -64,3 +64,39 @@
   line-height: 18px;
   color: var(--dsw-alias-label-secondary, #61666b);
 }
+
+.restartHint {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-secondary, #61666b);
+}
+
+.restartButton {
+  align-self: flex-start;
+  min-height: 36px;
+  margin-top: 8px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--dsw-alias-brand-primary, #3964fe);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.restartButton:hover {
+  filter: brightness(0.96);
+}
+
+.restartButton:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary, #3964fe);
+  outline-offset: 3px;
+}
+
+.restartError {
+  max-width: 480px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-status-error, #c73232);
+}

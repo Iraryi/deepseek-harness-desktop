@@ -2,9 +2,13 @@
 
 DeepSeek Harness is a plugin-based agent harness on vendored Cordis: **everything is a plugin**. Read [docs/architecture.md](docs/architecture.md) before changing `packages/`; follow [docs/AGENTS.md](docs/AGENTS.md) for documentation.
 
+## Mandatory Desktop / Setup / HUB product requirements
+
+Desktop, CONFIG, Setup, HUB, catalog, and Web UI work must read [HUB_REQUIREMENTS.md](HUB_REQUIREMENTS.md), then update [HUB_EXECUTION_STATE.md](HUB_EXECUTION_STATE.md). Both survive compaction and handoff; only explicit user instructions override them. Never rely on memory.
+
 ## Pre-release stance: foundation over blast radius
 
-**Remove this section at the first tagged release.** With no external consumers, prefer the correct foundation over compatibility shims: rename or repackage freely and update every reference together. Backends reject old on-disk formats. SQLite uses monotonic `SCHEMA_VERSION`; `dsh-session` keeps `SESSION_FORMAT_VERSION` at `0` with no compatibility promise.
+**Remove at the first tagged release.** With no external consumers, prefer foundations over compatibility shims and update every reference together. Reject old on-disk formats. SQLite uses monotonic `SCHEMA_VERSION`; `dsh-session` keeps `SESSION_FORMAT_VERSION` at `0` without compatibility promises.
 
 ## Repository layout
 
@@ -81,7 +85,7 @@ pnpm run demo:acp       # ACP automation server (needs DEEPSEEK_API_KEY)
 
 ### Host sandbox failures
 
-When required `gh`, `pnpm`, build, test, or generator commands fail because the agent sandbox blocks credentials, network, IPC, file watching, or nested `sandbox-exec`, retry unchanged with the narrowest host escalation before diagnosing authentication or project failure. Require sandbox evidence; never bypass genuine test failures or the product sandbox under test.
+When the agent sandbox blocks a required command, retry unchanged with the narrowest host escalation before diagnosing project failure. Require sandbox evidence; never bypass genuine failures or the product sandbox under test.
 
 ### Run relevant checks locally
 
@@ -142,7 +146,7 @@ Docs accompany every code change: update affected README and JSDoc contracts tog
 
 ## Editing these instructions
 
-`CLAUDE.md` symlinks `AGENTS.md` at root, `packages/`, and `examples/`; edit the real file. Keep each rule self-contained while linking high-level docs. Condense when clarity survives; raise a `verify-doc-budgets` ceiling when the required content genuinely needs more space.
+`CLAUDE.md` symlinks the root, `packages/`, and `examples/` instruction files; edit each real `AGENTS.md`. Keep rules self-contained and linked. Condense before raising a `verify-doc-budgets` ceiling.
 
 ## Vendoring policy
 

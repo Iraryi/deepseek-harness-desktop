@@ -44,8 +44,20 @@ interface PluginInvocation {
   args: string[]
 }
 
+/** Inspect or install one validated Setup manifest. */
+interface SetupInvocation {
+  mode: 'setup'
+  action: 'inspect' | 'install'
+  manifest: string
+  profile?: string
+  acceptSource: boolean
+  acceptUnverified: boolean
+  silent: boolean
+  json: boolean
+}
+
 /** The resolved `dsh` invocation. Help, version, and errors exit inside {@link parseDshArgs}. */
-export type DshInvocation = ProfileInvocation | DumpConfigInvocation | PluginInvocation
+export type DshInvocation = ProfileInvocation | DumpConfigInvocation | PluginInvocation | SetupInvocation
 
 /** Launcher flags shared by the default command and the `web` alias. */
 interface BootOptions {
@@ -69,6 +81,8 @@ Examples:
   dsh --profile tui --resume <session>       arguments after the launcher flags reach the app
   dsh --profile web --help                   the web app's own flags and help
   dsh plugin --profile tui add <package>     install a plugin into the tui profile
+  dsh setup inspect ./setup.json             show license, source, signature, and audit evidence
+  dsh setup install ./setup.json             install a certified virtual or executable Setup
 `
 
 /**
@@ -178,6 +192,38 @@ export function parseDshArgs(argv: readonly string[], version: string): DshInvoc
       if (options.profile === '') program.error('error: --profile needs a name')
       if (args.length === 0) program.error('error: plugin needs pnpm arguments to forward (e.g. add <package>)')
       resolved = { mode: 'plugin', profile: options.profile, args }
+    })
+
+  const setup = program.command('setup').description('inspect or install a Setup manifest through HUB-compatible trust rules')
+  setup.command('inspect')
+    .argument('<manifest>', 'local path or HTTPS URL of setup.json')
+    .option('--json', 'print normalized JSON instead of the human evidence view')
+    .action((manifest: string, options: { json?: boolean }) => {
+      rejectParentOptions('setup inspect')
+      resolved = {
+        mode: 'setup', action: 'inspect', manifest, acceptSource: false,
+        acceptUnverified: false, silent: false, json: options.json === true,
+      }
+    })
+
+  setup.command('install')
+    .argument('<manifest>', 'local path or HTTPS URL of setup.json')
+    .option('--profile <name>', 'override the profile selected by a virtual Setup')
+    .option('--accept-source', 'allow a GitHub-source Setup that is not DSH Certified')
+    .option('--accept-unverified', 'allow an unverified non-GitHub Setup')
+    .option('--silent', 'use the executable Setup\'s reviewed silent arguments')
+    .action((manifest: string, options: { profile?: string; acceptSource?: boolean; acceptUnverified?: boolean; silent?: boolean }) => {
+      rejectParentOptions('setup install')
+      if (options.profile === '') program.error('error: --profile needs a name')
+      const profile = options.profile
+      resolved = {
+        mode: 'setup', action: 'install', manifest,
+        ...(profile === undefined ? {} : { profile }),
+        acceptSource: options.acceptSource === true,
+        acceptUnverified: options.acceptUnverified === true,
+        silent: options.silent === true,
+        json: false,
+      }
     })
 
   try {

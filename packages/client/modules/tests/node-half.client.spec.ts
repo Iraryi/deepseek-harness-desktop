@@ -37,8 +37,12 @@ function writePackage(
   return clientPath
 }
 
-/** Construct the node-half service and capture its plugin-bundle route. */
-function constructWithRoute(packageNames: string[]): { service: ClientModuleRegistry; route: WebRoute } {
+/** Construct the node-half service and capture its plugin-bundle route plus index transform. */
+function constructWithRoute(packageNames: string[]): {
+  service: ClientModuleRegistry
+  route: WebRoute
+  transformIndex: (html: string) => string
+} {
   const ctx = new Context()
   ctx.baseUrl = pathToFileURL(root!).href + '/'
   ctx.provide('loader', {
@@ -49,18 +53,23 @@ function constructWithRoute(packageNames: string[]): { service: ClientModuleRegi
     },
   })
   let route: WebRoute | undefined
+  let transformIndex: ((html: string) => string) | undefined
   const webServer: Pick<WebServer, 'port' | 'register' | 'tapIndex'> = {
     port: 0,
     register: (candidate) => {
       if (candidate.path === '/plugins') route = candidate
       return () => {}
     },
-    tapIndex: () => () => {},
+    tapIndex: (transform) => {
+      transformIndex = transform
+      return () => {}
+    },
   }
   ctx.provide('webServer', webServer as WebServer)
   const service = new ClientModuleRegistry(ctx)
   if (route === undefined) throw new Error('client bundle route was not registered')
-  return { service, route }
+  if (transformIndex === undefined) throw new Error('client boot-manifest transform was not registered')
+  return { service, route, transformIndex }
 }
 
 /** Construct the node-half service over the enabled fixture entries. */
@@ -81,6 +90,21 @@ describe('client bundle activation', () => {
     mkdirSync(dirname(clientPath), { recursive: true })
     writeFileSync(clientPath, 'module.exports = {}\n')
     expect(construct([currentName]).graph().entries.map(entry => entry.id)).toEqual([currentName])
+  })
+
+  it('retries a package resolution miss before serving the boot manifest', () => {
+    const packageName = '@fixture/healed-fallback'
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-client-modules-')))
+    const { service, transformIndex } = constructWithRoute([packageName])
+    expect(service.graph().entries).toEqual([])
+
+    const clientPath = writePackage(packageName)
+    mkdirSync(dirname(clientPath), { recursive: true })
+    writeFileSync(clientPath, 'module.exports = {}\n')
+
+    const html = transformIndex('<html><head></head></html>')
+    expect(service.graph().entries.map(entry => entry.id)).toEqual([packageName])
+    expect(html).toContain(packageName)
   })
 
   it('groups missing bundles under one source-build instruction with a package/path list', () => {

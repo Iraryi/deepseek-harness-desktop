@@ -1,6 +1,6 @@
 param(
     [string]$OutputDirectory = "$PSScriptRoot\dist",
-    [string]$ReleaseBaseUrl = 'https://github.com/Iraryi/deepseek-harness-desktop/releases',
+    [string]$ReleaseBaseUrl = 'https://github.com/Iraryi/deepseek-harness-hub/releases',
     [string]$InnoCompiler = '',
     [switch]$SkipProductBuild,
     [switch]$SkipSmoke
@@ -59,16 +59,41 @@ if (-not $SkipProductBuild) {
 
 $requiredLauncherFiles = @(
     'dsh.exe',
+    'dsh-hub.exe',
     'dsh-config.exe',
     'Microsoft.Web.WebView2.Core.dll',
     'Microsoft.Web.WebView2.WinForms.dll',
-    'WebView2Loader.dll'
+    'WebView2Loader.dll',
+    'community-registry.json',
+    'THIRD-PARTY-NOTICES.txt'
 )
 foreach ($name in $requiredLauncherFiles) {
     if (-not (Test-Path (Join-Path $launcherDist $name))) { throw "Launcher output is missing: $name" }
 }
 if (-not (Test-Path $runtimeDist)) { throw "Runtime directory is missing: $runtimeDist" }
 if (-not (Test-Path $runtimeArchive)) { throw "Runtime archive is missing: $runtimeArchive" }
+
+if (-not $SkipSmoke) {
+    Invoke-Checked 'powershell.exe' @(
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $launcherRoot 'smoke-ready-gate.ps1'),
+      '-LauncherDirectory', $launcherDist
+    ) $repository
+    Invoke-Checked 'powershell.exe' @(
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $launcherRoot 'smoke-ready-gate.ps1'),
+      '-LauncherDirectory', $launcherDist,
+      '-LauncherName', 'dsh-hub.exe',
+      '-ExpectedSurface', 'hub'
+    ) $repository
+    Invoke-Checked 'powershell.exe' @(
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $launcherRoot 'smoke-ready-gate.ps1'),
+      '-LauncherDirectory', $launcherDist,
+      '-ExpectServiceRecovery'
+    ) $repository
+    Invoke-Checked 'powershell.exe' @(
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $launcherRoot 'smoke-dshmk-install.ps1'),
+      '-LauncherDirectory', $launcherDist
+    ) $repository
+}
 
 Get-MicrosoftBinary 'https://go.microsoft.com/fwlink/?linkid=2124701' `
     (Join-Path $setupCache 'MicrosoftEdgeWebView2RuntimeInstallerX64.exe')
@@ -133,8 +158,8 @@ $assets = @($assetFiles | ForEach-Object {
 $manifestPath = Join-Path $output 'release-manifest.json'
 [ordered]@{
     schemaVersion = 1
-    product = 'DeepSeek Harness Desktop'
-    repository = 'Iraryi/deepseek-harness-desktop'
+    product = 'DeepSeek Harness Desktop Distribution'
+    repository = 'Iraryi/deepseek-harness-hub'
     version = $version
     tag = $tag
     platform = 'win-x64'

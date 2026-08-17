@@ -1,6 +1,6 @@
 /** Models section registration: slot declaration injection, the locale-following label thunk, and HMR recovery. */
 import { Context } from '@deepseek-ai/cordis'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
@@ -13,6 +13,10 @@ import { WelcomeNotice } from '../src/client/WelcomeNotice.tsx'
 // The service reads its initial locale from the browser; these specs assert
 // the shipped Chinese copy, so they state the browser they assume.
 usePinnedBrowserLanguages('zh-CN')
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 async function bench(isLoopback = true) {
   const ctx = new Context()
@@ -86,6 +90,17 @@ describe('ui-settings-models apply', () => {
     expect(after.slots.entries('settings.onboarding')).toHaveLength(2)
     // The self-inflicted ledger notifications hit the duplicate guard.
     expect(after.slots.entries('settings.section')).toHaveLength(1)
+  })
+
+  it('keeps product onboarding out of dedicated application surfaces', async () => {
+    vi.stubGlobal('location', { search: '?dshSurface=hub' })
+    const b = await bench()
+    declare(b.slots)
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+
+    expect(b.slots.entries('settings.section')[0]?.component).toBe(ModelsSection)
+    expect(b.slots.entries('settings.onboarding')).toHaveLength(0)
+    await b.ctx.fiber.dispose()
   })
 
   it('the label thunk follows the active locale without re-registration', async () => {

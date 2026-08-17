@@ -8,7 +8,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$repository = 'Iraryi/deepseek-harness-desktop'
+$repository = 'Iraryi/deepseek-harness-hub'
 $headers = @{
     Accept = 'application/vnd.github+json'
     'User-Agent' = 'DeepSeek-Harness-Desktop-Downloader'

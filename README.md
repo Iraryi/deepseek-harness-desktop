@@ -12,7 +12,7 @@ DeepSeek Harness is currently in _developer preview_ and is iterating rapidly. *
 
 ## Windows desktop
 
-This repository also carries an unofficial Windows desktop distribution with a native WebView2 window, a separate CONFIG application, Full and Lite Setup packages, and a portable ZIP. Download published builds from the [desktop releases](https://github.com/Iraryi/deepseek-harness-desktop/releases) or read the [Windows reference](windows/README.md).
+This repository also carries the Windows desktop distribution source: native WebView2 hosts, the separate CONFIG application, runtime packaging, and integration tests. User-facing Setup packages, the HUB catalog, and ecosystem documentation are published through [DeepSeek Harness HUB](https://github.com/Iraryi/deepseek-harness-hub); implementation details remain in the [Windows reference](windows/README.md).
 
 ## Run
 

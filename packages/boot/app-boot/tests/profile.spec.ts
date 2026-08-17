@@ -81,6 +81,15 @@ describe('manifest round-trip', () => {
     expect(() => readProfileManifest('t', dir)).toThrow('must hold a JSON object')
     expect(() => readProfileManifest('t', join(dir, 'nope'))).toThrow('failed to read profile manifest')
   })
+
+  it('accepts a UTF-8 BOM written by Windows tooling', () => {
+    const dir = tmp()
+    writeFileSync(join(dir, 'package.json'), '\uFEFF' + JSON.stringify({
+      name: 'bom-profile',
+      dsh: { profile: { bundles: ['bundle-a'] } },
+    }))
+    expect(readProfileManifest('t', dir).dsh?.profile?.bundles).toEqual(['bundle-a'])
+  })
 })
 
 describe('resolveBundleDir', () => {
@@ -118,6 +127,16 @@ describe('resolveBundleDir', () => {
 })
 
 describe('loadProfile', () => {
+  it('accepts a UTF-8 BOM in an installed bundle manifest', () => {
+    const anchor = stageInstallation({ 'bom-bundle': { patch: '[]\n' } })
+    const bundleManifestPath = join(anchor, '..', 'node_modules', 'bom-bundle', 'package.json')
+    writeFileSync(bundleManifestPath, '\uFEFF' + readFileSync(bundleManifestPath, 'utf8'))
+    const home = tmp()
+    initProfile(resolveProfileDir('demo', home), ['bom-bundle'])
+    expect(loadProfile('t', 'demo', anchor, home).layers.map(layer => layer.packageName))
+      .toEqual(['bom-bundle'])
+  })
+
   it('resolves each dsh.profile.bundles entry to its patch layer in order, plus the user layer', () => {
     const anchor = stageInstallation({
       'bundle-a': { patch: '- insert:\n    - id: a\n      name: pkg-a\n' },

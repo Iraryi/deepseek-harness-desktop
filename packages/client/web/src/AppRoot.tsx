@@ -8,7 +8,7 @@
  * loading page, lists the per-entry fiber states and the sweep report (fail
  * loud, no partial UI).
  */
-import { useSyncExternalStore } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import type { KernelSignal, LoaderStatus } from './loader-status.ts'
 import css from './AppRoot.module.css'
@@ -23,10 +23,14 @@ export interface AppRootProps {
   error: KernelSignal<string | undefined>
   /** Builds the real UI; called only after settled. */
   renderApp: () => ReactNode
+  /** Restarts the current browser host after a plugin lifecycle failure. */
+  restartApplication?: () => Promise<void>
 }
 
 /** Boot gate: loading page until the boot settles; failures stay here. */
 export function AppRoot(props: AppRootProps) {
+  const [restarting, setRestarting] = useState(false)
+  const [restartError, setRestartError] = useState<string>()
   const settled = useSyncExternalStore(props.settled.subscribe, props.settled.getSnapshot)
   const status = useSyncExternalStore(props.status.subscribe, props.status.getSnapshot)
   const error = useSyncExternalStore(props.error.subscribe, props.error.getSnapshot)
@@ -35,6 +39,28 @@ export function AppRoot(props: AppRootProps) {
   if (settled) return <>{props.renderApp()}</>
 
   const loud = error !== undefined || failed.length > 0
+
+  if (restarting) {
+    return (
+      <div className={css.boot}>
+        <div className={css.card}>
+          <div className={css.spinner} />
+          <div className={css.restartHint}>重启中</div>
+        </div>
+      </div>
+    )
+  }
+
+  const restart = async (): Promise<void> => {
+    setRestartError(undefined)
+    setRestarting(true)
+    try {
+      await props.restartApplication?.()
+    } catch (reason) {
+      setRestartError(String(reason))
+      setRestarting(false)
+    }
+  }
 
   return (
     <div className={css.boot}>
@@ -52,6 +78,12 @@ export function AppRoot(props: AppRootProps) {
               <div className={css.failedTitle}>Failed to load plugins</div>
               {failed.map(([id]) => <div key={id} className={css.failedItem}>{id}</div>)}
               {error !== undefined && <div className={css.failedItem}>{error}</div>}
+              {restartError !== undefined && <div className={css.restartError}>{restartError}</div>}
+              {props.restartApplication !== undefined && (
+                <button className={css.restartButton} type="button" onClick={() => { void restart() }}>
+                  重启应用
+                </button>
+              )}
             </div>
           )}
       </div>

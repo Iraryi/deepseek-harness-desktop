@@ -30,6 +30,19 @@ $backup = Join-Path $parent ('.runtime-backup-' + $operation)
 $sourceWork = Join-Path $parent ('.runtime-source-' + $operation)
 $installed = $false
 
+function Get-Sha256Hex([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = $sha256.ComputeHash($stream)
+        return ([BitConverter]::ToString($bytes)).Replace('-', '')
+    }
+    finally {
+        $sha256.Dispose()
+        $stream.Dispose()
+    }
+}
+
 function Remove-OwnedTree([string]$Path, [string[]]$AllowedPrefixes) {
     if (-not (Test-Path $Path)) { return }
     $resolved = [IO.Path]::GetFullPath($Path)
@@ -88,12 +101,24 @@ function Assert-Runtime([string]$Root) {
 
     $entry = [IO.Path]::GetFullPath((Join-Path $Root $manifest.entry))
     $node = [IO.Path]::GetFullPath((Join-Path $Root $manifest.node))
+    $npm = [IO.Path]::GetFullPath((Join-Path $Root $manifest.packageManager.command))
+    $npmCli = [IO.Path]::GetFullPath((Join-Path $Root $manifest.packageManager.cli))
+    $resolver = [IO.Path]::GetFullPath((Join-Path $Root $manifest.resolver))
     $prefix = [IO.Path]::GetFullPath($Root) + [IO.Path]::DirectorySeparatorChar
     if (-not $entry.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path $entry)) {
         throw "Runtime entry is invalid or missing: $entry"
     }
     if (-not $node.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path $node)) {
         throw "Bundled Node is invalid or missing: $node"
+    }
+    if (-not $npm.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path $npm)) {
+        throw "Bundled npm command is invalid or missing: $npm"
+    }
+    if (-not $npmCli.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path $npmCli)) {
+        throw "Bundled npm CLI is invalid or missing: $npmCli"
+    }
+    if (-not $resolver.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path $resolver)) {
+        throw "Runtime resolver is invalid or missing: $resolver"
     }
 
     $links = @(Get-ChildItem -LiteralPath $Root -Recurse -Attributes ReparsePoint -ErrorAction SilentlyContinue)
@@ -108,7 +133,11 @@ function Assert-Runtime([string]$Root) {
     if ($major -lt 22 -or ($major -eq 22 -and $minor -lt 19)) {
         throw "Bundled Node $nodeVersion is older than 22.19.0"
     }
-    return [pscustomobject]@{ Manifest = $manifest; NodeVersion = $nodeVersion }
+    $npmVersion = (& $node $npmCli --version).Trim()
+    if ($LASTEXITCODE -ne 0 -or $npmVersion -notmatch '^\d+\.\d+\.\d+') {
+        throw "Bundled npm did not report a valid version: $npmVersion"
+    }
+    return [pscustomobject]@{ Manifest = $manifest; NodeVersion = $nodeVersion; NpmVersion = $npmVersion }
 }
 
 function Resolve-NodeForSourceBuild {
@@ -138,7 +167,7 @@ try {
 
     if ($Mode -eq 'archive') {
         if (-not [string]::IsNullOrWhiteSpace($ExpectedSha256)) {
-            $actual = (Get-FileHash $input -Algorithm SHA256).Hash
+            $actual = Get-Sha256Hex $input
             if (-not $actual.Equals($ExpectedSha256, [StringComparison]::OrdinalIgnoreCase)) {
                 throw "Runtime archive SHA-256 mismatch. Expected $ExpectedSha256, got $actual"
             }
@@ -187,6 +216,13 @@ try {
 
     $payload = Find-PayloadRoot $stage
     $runtime = Assert-Runtime $payload
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedSha256)) {
+        [IO.File]::WriteAllText(
+            (Join-Path $payload '.source-sha256'),
+            $ExpectedSha256.ToLowerInvariant(),
+            [Text.UTF8Encoding]::new($false)
+        )
+    }
 
     if (Test-Path $backup) { Remove-OwnedTree $backup @('.runtime-backup-') }
     if (Test-Path $destinationPath) { Move-Item -LiteralPath $destinationPath -Destination $backup }
