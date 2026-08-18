@@ -9,11 +9,7 @@ internal static class AppPaths
 {
     public static string ExeDir
     {
-        get
-        {
-            string assemblyDirectory = Path.GetDirectoryName(typeof(AppPaths).Assembly.Location);
-            return string.IsNullOrEmpty(assemblyDirectory) ? AppDomain.CurrentDomain.BaseDirectory : assemblyDirectory;
-        }
+        get { return AppDomain.CurrentDomain.BaseDirectory; }
     }
 
     public static bool IsPortable
@@ -25,11 +21,6 @@ internal static class AppPaths
     {
         get
         {
-            string overrideDirectory = Environment.GetEnvironmentVariable("DEEPSEEK_HARNESS_DATA_DIR");
-            if (!string.IsNullOrWhiteSpace(overrideDirectory))
-            {
-                return Path.GetFullPath(overrideDirectory);
-            }
             if (IsPortable)
             {
                 return Path.Combine(ExeDir, "data");
@@ -43,11 +34,6 @@ internal static class AppPaths
         get { return Path.Combine(DataDir, "config.json"); }
     }
 
-    public static string HubConfigFile
-    {
-        get { return Path.Combine(DataDir, "hub-config.json"); }
-    }
-
     public static string LogDir
     {
         get { return Path.Combine(DataDir, "logs"); }
@@ -58,88 +44,11 @@ internal static class AppPaths
         get { return Path.Combine(DataDir, "WebView2"); }
     }
 
-    public static string DshHome
-    {
-        get
-        {
-            string configured = Environment.GetEnvironmentVariable("DSH_HOME");
-            if (!string.IsNullOrWhiteSpace(configured)) return Path.GetFullPath(configured);
-            return Path.Combine(DataDir, "dsh");
-        }
-    }
-
     public static void Ensure()
     {
         Directory.CreateDirectory(DataDir);
         Directory.CreateDirectory(LogDir);
         Directory.CreateDirectory(WebView2Dir);
-        Directory.CreateDirectory(DshHome);
-    }
-}
-
-internal sealed class HubConfig
-{
-    public string Theme { get; set; }
-    public string StartPage { get; set; }
-    public string DiscoverySource { get; set; }
-    public int PageSize { get; set; }
-    public string DetailEntry { get; set; }
-    public string DetailMode { get; set; }
-    public string DetailContent { get; set; }
-    public string LoadingStyle { get; set; }
-    public string CloseAction { get; set; }
-    public bool ShowTrayButton { get; set; }
-    public bool AllowDesktopPlugins { get; set; }
-
-    public HubConfig()
-    {
-        Theme = "system";
-        StartPage = "home";
-        DiscoverySource = "dshmk";
-        PageSize = 24;
-        DetailEntry = "button";
-        DetailMode = "side";
-        DetailContent = "native";
-        LoadingStyle = "whales";
-        CloseAction = "exit";
-        ShowTrayButton = true;
-        AllowDesktopPlugins = false;
-    }
-
-    public static HubConfig Load()
-    {
-        AppPaths.Ensure();
-        HubConfig config = null;
-        try
-        {
-            if (File.Exists(AppPaths.HubConfigFile))
-            {
-                JavaScriptSerializer serializer = new JavaScriptSerializer();
-                config = serializer.Deserialize<HubConfig>(File.ReadAllText(AppPaths.HubConfigFile, Encoding.UTF8));
-            }
-        }
-        catch
-        {
-            config = null;
-        }
-        if (config == null) config = new HubConfig();
-        if (config.Theme != "system" && config.Theme != "light" && config.Theme != "dark") config.Theme = "system";
-        if (config.StartPage != "home" && config.StartPage != "github" && config.StartPage != "library" && config.StartPage != "installed") config.StartPage = "home";
-        if (config.DiscoverySource != "dshmk" && config.DiscoverySource != "community" && config.DiscoverySource != "github") config.DiscoverySource = "dshmk";
-        if (config.PageSize != 12 && config.PageSize != 24 && config.PageSize != 48 && config.PageSize != 96 && config.PageSize != 200) config.PageSize = 24;
-        if (config.DetailEntry != "button" && config.DetailEntry != "card") config.DetailEntry = "button";
-        if (config.DetailMode != "side" && config.DetailMode != "modal" && config.DetailMode != "full") config.DetailMode = "side";
-        if (config.DetailContent != "native" && config.DetailContent != "original") config.DetailContent = "native";
-        if (config.LoadingStyle != "whales" && config.LoadingStyle != "progress" && config.LoadingStyle != "off") config.LoadingStyle = "whales";
-        if (config.CloseAction != "tray" && config.CloseAction != "exit") config.CloseAction = "exit";
-        return config;
-    }
-
-    public void Save()
-    {
-        AppPaths.Ensure();
-        JavaScriptSerializer serializer = new JavaScriptSerializer();
-        File.WriteAllText(AppPaths.HubConfigFile, serializer.Serialize(this), Encoding.UTF8);
     }
 }
 
@@ -231,7 +140,7 @@ internal sealed class AppConfig
         {
             cfg.Language = CultureInfo.CurrentUICulture.Name.StartsWith("zh", StringComparison.OrdinalIgnoreCase) ? "zh-CN" : "en-US";
         }
-        if (existingConfig && !firstRunFieldPresent) cfg.FirstRunCompleted = false;
+        if (existingConfig && !firstRunFieldPresent) cfg.FirstRunCompleted = true;
         if (string.IsNullOrEmpty(cfg.LaunchMode)) cfg.LaunchMode = "window";
         if (string.IsNullOrEmpty(cfg.Url)) cfg.Url = "http://127.0.0.1:3080";
         if (cfg.Port <= 0 || cfg.Port > 65535) cfg.Port = 3080;

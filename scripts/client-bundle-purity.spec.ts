@@ -75,8 +75,6 @@ describe('client bundle purity gate', () => {
     expect(resolveId('@deepseek-ai/dsh-host-apiproxy/api')).toBeNull()
     expect(resolveId('@deepseek-ai/dsh-session/surface')).toBeNull()
     expect(resolveId('@deepseek-ai/dsh-brand')).toBeNull()
-    expect(resolveId('@deepseek-ai/dsh-setup-protocol')).toBeNull()
-    expect(resolveId('@deepseek-ai/dsh-setup-registry')).toBeNull()
   })
 
   it('lets exact generated Remote contributions inline without admitting their package implementation', () => {

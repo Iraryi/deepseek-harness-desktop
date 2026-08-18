@@ -114,7 +114,6 @@
   pointer-events: none;
 }
 
-.overlayLayer > *,
-.overlayLayer > [data-slot='shell.overlay'] > * {
+.overlayLayer > * {
   pointer-events: auto;
 }

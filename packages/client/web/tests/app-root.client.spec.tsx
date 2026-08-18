@@ -7,14 +7,14 @@
  * gate semantics. Stores are the kernel-own signals production boot uses
  * (shell self-sufficiency: the loading page depends on no plugin package).
  */
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
+import { act, cleanup, render } from '@testing-library/react'
 
 afterEach(cleanup)
 import { AppRoot } from '@deepseek-ai/dsh-client-web/src/AppRoot.tsx'
 import { createLoaderStatusStore, createSignal } from '@deepseek-ai/dsh-client-web/src/loader-status.ts'
 
-function mount(restartApplication?: () => Promise<void>) {
+function mount() {
   const settled = createSignal(false)
   const error = createSignal<string | undefined>(undefined)
   const status = createLoaderStatusStore()
@@ -24,7 +24,6 @@ function mount(restartApplication?: () => Promise<void>) {
       settled={settled}
       status={status}
       error={error}
-      {...(restartApplication === undefined ? {} : { restartApplication })}
       renderApp={() => { renders += 1; return <div data-testid="real-ui" /> }}
     />,
   )
@@ -65,25 +64,6 @@ describe('AppRoot', () => {
     expect(getByText('Failed to load plugins')).toBeTruthy()
     expect(getByText(/waiting for service/)).toBeTruthy()
     expect(queryByTestId('real-ui')).toBeNull()
-  })
-
-  it('replaces a plugin failure with the restart transition immediately', async () => {
-    const restartApplication = vi.fn(() => new Promise<void>(() => {}))
-    const { error, getByRole, getByText, queryByText } = mount(restartApplication)
-    act(() => { error.set('plugin activation failed') })
-    fireEvent.click(getByRole('button', { name: '重启应用' }))
-    await waitFor(() => { expect(restartApplication).toHaveBeenCalledOnce() })
-    expect(getByText('重启中')).toBeTruthy()
-    expect(queryByText('Failed to load plugins')).toBeNull()
-  })
-
-  it('restores the failure surface when the restart request is rejected', async () => {
-    const restartApplication = vi.fn(async () => { throw new Error('native restart unavailable') })
-    const { error, getByRole, findByText } = mount(restartApplication)
-    act(() => { error.set('plugin activation failed') })
-    fireEvent.click(getByRole('button', { name: '重启应用' }))
-    expect(await findByText('Error: native restart unavailable')).toBeTruthy()
-    expect(getByRole('button', { name: '重启应用' })).toBeTruthy()
   })
 
   it('flipping settled switches to the real UI in one pass', () => {

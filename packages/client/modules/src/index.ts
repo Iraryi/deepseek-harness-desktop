@@ -7,16 +7,15 @@
  * `clientModuleHost` service (the HMR node half's registration/notification
  * face).
  *
- * Scanning is incremental per package. Every cordis `internal/plugin`
- * emission (fiber construction/disposal) marks the fiber's entry name dirty;
- * a microtask flush reconciles each dirty name against the live loader
- * entries. The activation pass and every index response also reconcile the
- * complete current entry set, so a package that becomes resolvable while an
- * installation fallback is being healed cannot leave the process serving a
- * permanently empty boot graph. Confirmed package metadata (including the
- * negative "not a client package" verdict) is cached per name; a resolution
- * miss is retried because the filesystem target can appear without a Loader
- * lifecycle event. Bundle content changes reach the graph only through
+ * Scanning is incremental per package — there is no full-rescan code path.
+ * Every cordis `internal/plugin` emission (fiber construction/disposal) marks
+ * the fiber's entry name dirty; a microtask flush reconciles each dirty name
+ * against the live loader entries. The activation pass seeds the same dirty
+ * set with all current entries and flushes synchronously, so first scan and
+ * steady state share one implementation. Package metadata (including the
+ * negative "not a client package" verdict) is cached per name and never
+ * expires — plugin-set changes take effect on restart; bundle content
+ * changes reach the graph only through
  * {@link ClientModuleRegistry.rebuilt}.
  * @module @deepseek-ai/dsh-client-modules
  */
@@ -52,7 +51,7 @@ interface DshClientDeclaration {
   immediately?: boolean
 }
 
-/** Resolved package metadata for one `dsh.client` package. */
+/** Resolved package metadata for one `dsh.client` package (cached per name, never expires). */
 interface PkgMeta {
   clientPath: string
   inject?: string[]
@@ -186,9 +185,9 @@ export class ClientModuleRegistry extends Service {
   static inject = ['webServer', 'loader']
 
   private readonly table = new Map<string, WebPluginRecord>()
-  // Confirmed negative package verdicts are cached. Resolution misses are not:
-  // the profile module fallback can be replaced while an installation moves,
-  // and that filesystem repair does not emit a Loader lifecycle event.
+  // Negative verdicts (unresolvable specifier — builtins like cordis:include,
+  // subpath rows — or a package without a web `dsh.client` declaration) are
+  // cached as null and never expire: plugin-set changes take effect on restart.
   private readonly pkgMeta = new Map<string, PkgMeta | null>()
   private readonly rebuildListeners = new Set<(id: string, rev: string) => void>()
   private readonly graphListeners = new Set<() => void>()
@@ -228,11 +227,13 @@ export class ClientModuleRegistry extends Service {
       })
     })
 
-    // Activation pass uses the same complete reconciliation that index
-    // responses use after a profile fallback repair.
+    // Activation pass: the initial scan IS the incremental path over the
+    // current entries, flushed synchronously (nothing async between subscribe,
+    // seed, and flush).
+    for (const entry of ctx.loader.entries()) this.dirty.add(entry.options.name)
     this.composed = this.compose()
     const failures: Error[] = []
-    this.reconcileAll(err => failures.push(err))
+    this.flush(err => failures.push(err))
     if (failures.length > 0) {
       throw new ClientPackageCompositionError(failures)
     }
@@ -242,11 +243,7 @@ export class ClientModuleRegistry extends Service {
       'client-modules: bundle route',
     )
     ctx.effect(
-      () => ctx.webServer.tapIndex(async (html) => {
-        await ctx.loader.await()
-        this.reconcileAll((err) => { ctx.logger.warn(err) })
-        return injectBootManifest(html, this.composed)
-      }),
+      () => ctx.webServer.tapIndex(html => injectBootManifest(html, this.composed)),
       'client-modules: boot manifest injection',
     )
   }
@@ -340,9 +337,8 @@ export class ClientModuleRegistry extends Service {
       pkgPath = this.resolvePkgJson(pkgName)
     } catch {
       // Not a resolvable package root: loader builtins (cordis:include) and
-      // subpath entries (…/gateway) land here. Do not cache the miss: an
-      // installation fallback can make a package root resolvable later without
-      // producing another Loader lifecycle event.
+      // subpath entries (…/gateway) land here — permanently not a client row.
+      this.pkgMeta.set(pkgName, null)
       return null
     }
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as Record<string, unknown>
@@ -420,13 +416,6 @@ export class ClientModuleRegistry extends Service {
       this.composed = this.compose()
       this.notifyGraphChanged()
     }
-  }
-
-  /** Reconcile every live or previously published entry name against the current Loader tree. */
-  private reconcileAll(onError: (err: Error) => void): void {
-    for (const entry of this.ctx.loader.entries()) this.dirty.add(entry.options.name)
-    for (const entryName of this.table.keys()) this.dirty.add(entryName)
-    this.flush(onError)
   }
 
   private readonly serveBundle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {

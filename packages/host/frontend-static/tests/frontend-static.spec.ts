@@ -108,7 +108,7 @@ describe('real Loader composition', () => {
 
     // `/`, the index path, and any miss all render index.html (SPA routing)
     // through the registered index taps.
-    const untap = server.tapIndex(async html => html.replace('<head>', '<head><script>window.__T__=1</script>'))
+    const untap = server.tapIndex(html => html.replace('<head>', '<head><script>window.__T__=1</script>'))
     for (const path of ['/', '/index.html', '/no/such/route']) {
       const got = await request(port, path)
       expect(got.status).toBe(200)

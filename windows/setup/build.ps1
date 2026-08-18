@@ -2,7 +2,7 @@ param(
     [string]$OutputDirectory = "$PSScriptRoot\dist",
     [string]$LauncherDirectory = "$PSScriptRoot\..\launcher\dist",
     [string]$RuntimeArchive = "$PSScriptRoot\..\runtime\dist\DeepSeek-Harness-Runtime-win-x64.zip",
-    [string]$ReleaseBaseUrl = 'https://github.com/Iraryi/deepseek-harness-hub/releases',
+    [string]$ReleaseBaseUrl = 'https://github.com/Iraryi/deepseek-harness-desktop/releases',
     [string]$InnoCompiler = ''
 )
 
@@ -16,25 +16,19 @@ if (-not $output.StartsWith($setupRoot + [IO.Path]::DirectorySeparatorChar, [Str
 
 $launcher = [IO.Path]::GetFullPath($LauncherDirectory)
 $runtime = [IO.Path]::GetFullPath($RuntimeArchive)
-$runtimeDirectory = Join-Path (Split-Path $runtime -Parent) 'runtime'
 $webViewOffline = Join-Path $setupRoot 'cache\MicrosoftEdgeWebView2RuntimeInstallerX64.exe'
 $webViewBootstrapper = Join-Path $setupRoot 'cache\MicrosoftEdgeWebview2Setup.exe'
 $requiredLauncherFiles = @(
     'dsh.exe',
-    'dsh-hub.exe',
     'dsh-config.exe',
     'Microsoft.Web.WebView2.Core.dll',
     'Microsoft.Web.WebView2.WinForms.dll',
-    'WebView2Loader.dll',
-    'community-registry.json',
-    'dshmk-catalog.json',
-    'THIRD-PARTY-NOTICES.txt'
+    'WebView2Loader.dll'
 )
 foreach ($name in $requiredLauncherFiles) {
     if (-not (Test-Path (Join-Path $launcher $name))) { throw "Launcher file missing: $name" }
 }
 if (-not (Test-Path $runtime)) { throw "Runtime archive missing: $runtime" }
-if (-not (Test-Path $runtimeDirectory)) { throw "Runtime directory missing: $runtimeDirectory" }
 if (-not (Test-Path $webViewOffline)) { throw "Offline WebView2 installer missing: $webViewOffline" }
 if (-not (Test-Path $webViewBootstrapper)) { throw "WebView2 bootstrapper missing: $webViewBootstrapper" }
 
@@ -70,10 +64,6 @@ while ($numeric.Count -lt 4) { $numeric = @($numeric) + 0 }
 $numericVersion = '{0}.{1}.{2}.{3}' -f $numeric[0], $numeric[1], $numeric[2], $numeric[3]
 $runtimeAssetName = "DeepSeek-Harness-Runtime-$version-win-x64.zip"
 $runtimeSha256 = (Get-FileHash $runtime -Algorithm SHA256).Hash.ToLowerInvariant()
-$runtimeArchiveBytes = (Get-Item -LiteralPath $runtime).Length
-$runtimeInstalledBytes = (Get-ChildItem -LiteralPath $runtimeDirectory -File -Recurse | Measure-Object Length -Sum).Sum
-$webViewOfflineBytes = (Get-Item -LiteralPath $webViewOffline).Length
-$webViewBootstrapperBytes = (Get-Item -LiteralPath $webViewBootstrapper).Length
 
 if (Test-Path $output) { Remove-Item -LiteralPath $output -Recurse -Force }
 New-Item -ItemType Directory -Path $output | Out-Null
@@ -86,13 +76,9 @@ $defines = @(
     "/DRuntimeArchive=$runtime",
     "/DRuntimeAssetName=$runtimeAssetName",
     "/DRuntimeSha256=$runtimeSha256",
-    "/DRuntimeArchiveBytes=$runtimeArchiveBytes",
-    "/DRuntimeInstalledBytes=$runtimeInstalledBytes",
     "/DReleaseBaseUrl=$ReleaseBaseUrl",
     "/DWebViewOffline=$webViewOffline",
     "/DWebViewBootstrapper=$webViewBootstrapper",
-    "/DWebViewOfflineBytes=$webViewOfflineBytes",
-    "/DWebViewBootstrapperBytes=$webViewBootstrapperBytes",
     "/DRepositoryRoot=$repository"
 )
 
@@ -113,8 +99,6 @@ foreach ($name in $expected) {
 [pscustomobject]@{
     Version = $version
     RuntimeSha256 = $runtimeSha256
-    RuntimeArchiveBytes = $runtimeArchiveBytes
-    RuntimeInstalledBytes = $runtimeInstalledBytes
     Full = Join-Path $output $expected[0]
     Lite = Join-Path $output $expected[1]
 }

@@ -58,11 +58,6 @@ export function refreshIfLoaded(controller: ModelsSettingsStore): void {
  */
 export const inject = ['slots', 'locale', 'connection', 'remote']
 
-function hasDedicatedSurface(): boolean {
-  return typeof globalThis.location !== 'undefined'
-    && new URLSearchParams(globalThis.location.search).has('dshSurface')
-}
-
 /**
  * Register the Models section once the `settings.section` declaration is on
  * the ledger, wire its store to the connection, and keep it fresh on every
@@ -127,7 +122,6 @@ export function apply(ctx: ClientContext): void {
     label: () => t('nav'),
     inject: injected,
   }, ModelsSection))
-  if (hasDedicatedSurface()) return
   ctx.slots.inject('settings.onboarding', () => ctx.slots.register({
     name: 'settings.onboarding',
     id: 'welcome-notice',

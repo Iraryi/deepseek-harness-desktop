@@ -12,7 +12,7 @@ DeepSeek Harness 目前处于 _开发者预览_ 阶段，正在快速迭代。**
 
 ## Windows 桌面版
 
-本仓库同时承载 Windows 桌面发行层源码，包括原生 WebView2 宿主、独立 CONFIG 程序、运行时打包与集成测试。面向用户的 Setup、HUB 目录与生态文档统一发布在 [DeepSeek Harness HUB](https://github.com/Iraryi/deepseek-harness-hub)；实现细节见 [Windows 参考文档](windows/README.md)。
+本仓库还提供非官方 Windows 桌面发行版，包括原生 WebView2 窗口、独立 CONFIG 程序、Full 与 Lite 安装包和便携 ZIP。可从[桌面版 Releases](https://github.com/Iraryi/deepseek-harness-desktop/releases)下载成品，或阅读 [Windows 参考文档](windows/README.md)。
 
 ## 运行
 

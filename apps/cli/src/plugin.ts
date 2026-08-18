@@ -12,7 +12,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import {
   DEFAULT_PROFILE_BUNDLES,
   initProfile,
@@ -155,108 +155,4 @@ export function runPlugin(profile: string, args: readonly string[]): number {
     }
   }
   return exitCode
-}
-
-/** Bundled npm files used by Setup package installation. */
-export interface SetupPackageManager {
-  /** Node executable that owns the npm distribution. */
-  readonly node: string
-  /** npm CLI JavaScript entry invoked through {@link node}. */
-  readonly cli: string
-}
-
-/**
- * Resolve npm from the Node distribution that is running dsh. The Windows
- * desktop runtime carries this directory beside its private node.exe, so a
- * Setup never falls through to npm or pnpm on PATH.
- * @param nodeExecutable - Node executable whose bundled npm must be used.
- * @returns the private Node and npm CLI paths.
- */
-export function resolveSetupPackageManager(nodeExecutable: string = process.execPath): SetupPackageManager {
-  const node = resolve(nodeExecutable)
-  const nodeDirectory = dirname(node)
-  const candidates = [
-    join(nodeDirectory, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-    join(dirname(nodeDirectory), 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-  ]
-  const cli = candidates.find(candidate => existsSync(candidate))
-  if (cli === undefined) {
-    throw new Error(`bundled npm is missing beside ${node}; repair or reinstall the DSH runtime`)
-  }
-  return { node, cli }
-}
-
-/**
- * Install one Setup package with the private npm carried by the running Node
- * distribution, then reconcile its bundle declaration into the profile.
- * Lifecycle scripts are denied unless the Setup manifest declares the
- * `install-scripts` permission.
- * @param profile - profile receiving the package.
- * @param packageSpec - registry, HTTPS, git, archive, or filesystem npm spec.
- * @param allowInstallScripts - whether npm lifecycle scripts may execute.
- * @param nodeExecutable - Node executable whose bundled npm performs the install.
- * @returns the npm exit code.
- */
-export function installSetupPackage(
-  profile: string,
-  packageSpec: string,
-  allowInstallScripts: boolean,
-  nodeExecutable: string = process.execPath,
-): number {
-  const dir = resolveProfileDir(profile)
-  if (!existsSync(join(dir, 'package.json'))) {
-    initProfile(dir, PROFILE_TEMPLATES[profile] ?? DEFAULT_PROFILE_BUNDLES)
-    process.stderr.write(`${NAME}: initialized profile ${profile} at ${dir}\n`)
-  }
-  const before = readProfileManifest(NAME, dir)
-  const manager = resolveSetupPackageManager(nodeExecutable)
-  const args = [
-    manager.cli,
-    'install',
-    '--save-exact',
-    '--legacy-peer-deps',
-    '--no-audit',
-    '--no-fund',
-    ...(allowInstallScripts ? [] : ['--ignore-scripts']),
-    '--',
-    anchorPathSpec(packageSpec, process.cwd()),
-  ]
-  const result = spawnSync(manager.node, args, {
-    cwd: dir,
-    stdio: 'inherit',
-    shell: false,
-    env: { ...process.env, npm_config_update_notifier: 'false' },
-  })
-  if (result.error !== undefined) throw result.error
-  const exitCode = result.status ?? 1
-  if (exitCode === 0) reconcilePlugins(before, dir)
-  else process.stderr.write(`${NAME}: bundled npm failed in profile directory ${dir}\n`)
-  return exitCode
-}
-
-/**
- * Enable an installation-owned bundle without asking pnpm to download the
- * package that already ships inside the DSH runtime.
- * @param profile - profile receiving the bundle layer.
- * @param packageName - in-box bundle package name.
- * @returns zero on success.
- */
-export function enableInBoxBundle(profile: string, packageName: string): number {
-  const dir = resolveProfileDir(profile)
-  if (!existsSync(join(dir, 'package.json'))) {
-    initProfile(dir, PROFILE_TEMPLATES[profile] ?? DEFAULT_PROFILE_BUNDLES)
-    process.stderr.write(`${NAME}: initialized profile ${profile} at ${dir}\n`)
-  }
-  const bundleDir = resolveBundleDir(NAME, packageName, INSTALL_ANCHOR, dir)
-  const bundleManifest = readProfileManifest(NAME, bundleDir)
-  if (bundleManifest.dsh?.bundle?.patch === undefined) {
-    throw new Error(`${NAME}: ${packageName} is not an installable dsh.bundle`)
-  }
-  const manifest = readProfileManifest(NAME, dir)
-  const bundles = manifest.dsh?.profile?.bundles ?? []
-  if (bundles.includes(packageName)) return 0
-  bundles.push(packageName)
-  manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles } }
-  writeProfileManifest(dir, manifest)
-  return 0
 }

@@ -16,7 +16,7 @@
  * the bare-import fallback in tree.import must never run in a browser) →
  * await the prefetch tier, THEN adopt the modules entry and create one
  * loader entry per plugin-view row plus the shell-own app-shell assembly
- * entry → loader.await() + a bounded activation wait + a full fiber sweep (all ACTIVE, else fail
+ * entry → loader.await() + a full fiber sweep (all ACTIVE, else fail
  * listing who/what/which service) → flip the settled signal so AppRoot
  * switches to the real UI in one pass.
  *
@@ -44,9 +44,7 @@ import * as AppShell from './app-shell.ts'
 import { APP_SHELL_ID } from './app-shell.ts'
 import { AppRoot } from './AppRoot.tsx'
 import { getStaticModules } from './seed.ts'
-import {
-  STATE_LABELS, createLoaderStatusStore, createSignal, type LoaderEntryState,
-} from './loader-status.ts'
+import { STATE_LABELS, createLoaderStatusStore, createSignal } from './loader-status.ts'
 import './base.css'
 
 /** Module transport hook the shell passes through (jsdom tests replace the <script> path). */
@@ -60,183 +58,6 @@ export type BootSeams = Pick<ClientModuleSystemOptions, 'loadBundle'>
  * twice.
  */
 const MODULES_ID = '@deepseek-ai/dsh-client-modules'
-const DESKTOP_BOOT_HEARTBEAT_MILLISECONDS = 5_000
-const DESKTOP_BOOT_ACTIVATION_TIMEOUT_MILLISECONDS = 60_000
-
-const DESKTOP_BOOT_ID = /^[0-9a-f]{32}$/
-
-/** One loader entry that did not reach ACTIVE during browser boot. */
-export interface ClientEntryFailure {
-  /** Loader entry name from the host-authored graph. */
-  name: string
-  /** Final observed lifecycle state, or import-failed when no fiber exists. */
-  state: LoaderEntryState | 'import-failed'
-  /** Required services that were absent when a pending entry was audited. */
-  missingServices: string[]
-}
-
-/** Structured browser boot state consumed by the Windows WebView2 launcher. */
-export interface DesktopBootStatus {
-  /** Message discriminator. */
-  type: 'dsh-web-boot-status'
-  /** Navigation-specific token supplied through the desktopBoot query parameter. */
-  bootId: string
-  /** Current browser boot outcome. */
-  state: 'loading' | 'ready' | 'failed'
-  /** Whether a fresh navigation may recover this failure. */
-  retryable: boolean
-  /** Entries that prevented activation; empty outside failed state. */
-  failures: ClientEntryFailure[]
-  /** Human-readable report shared with the loading failure page. */
-  message?: string
-}
-
-interface DesktopWebViewMessageEvent {
-  readonly data: unknown
-}
-
-interface DesktopWebViewBridge {
-  postMessage(message: unknown): void
-  addEventListener?(type: 'message', listener: (event: DesktopWebViewMessageEvent) => void): void
-  removeEventListener?(type: 'message', listener: (event: DesktopWebViewMessageEvent) => void): void
-}
-
-interface DesktopBootStatusTarget {
-  location?: { readonly search: string; reload?(): void }
-  chrome?: { webview?: DesktopWebViewBridge }
-  __DSH_DESKTOP_BOOT_STATUS__?: DesktopBootStatus
-}
-
-/**
- * Audit loader entries without changing their state.
- * @param ctx - Client Loader context whose entries have completed their bounded activation wait.
- * @returns one diagnostic row for each entry that is not active.
- */
-export function collectClientEntryFailures(ctx: Context): ClientEntryFailure[] {
-  const failures: ClientEntryFailure[] = []
-  for (const entry of ctx.loader.entries()) {
-    const name = entry.options.name
-    if (entry.fiber === undefined) {
-      failures.push({ name, state: 'import-failed', missingServices: [] })
-      continue
-    }
-    const state = STATE_LABELS[entry.fiber.state]
-    if (state === 'active') continue
-    const missingServices = state === 'pending'
-      ? Object.keys(entry.fiber.inject).filter(service => ctx.get(service) === undefined)
-      : []
-    failures.push({ name, state, missingServices })
-  }
-  return failures
-}
-
-/**
- * Publish a navigation-scoped boot update when the WebView2 bridge is present.
- * @param update - Boot state and diagnostics for the current page.
- * @param target - Browser global; tests may supply an isolated target.
- */
-export function publishDesktopBootStatus(
-  update: Omit<DesktopBootStatus, 'type' | 'bootId'>,
-  target: DesktopBootStatusTarget = globalThis,
-): void {
-  const bootId = new URLSearchParams(target.location?.search ?? '').get('desktopBoot')
-  if (bootId === null || !DESKTOP_BOOT_ID.test(bootId)) return
-  const status: DesktopBootStatus = { type: 'dsh-web-boot-status', bootId, ...update }
-  target.__DSH_DESKTOP_BOOT_STATUS__ = status
-  target.chrome?.webview?.postMessage(status)
-}
-
-function isMessageRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-async function requestApplicationRestart(
-  target: DesktopBootStatusTarget = globalThis,
-): Promise<void> {
-  const webview = target.chrome?.webview
-  if (webview?.addEventListener === undefined || webview.removeEventListener === undefined) {
-    target.location?.reload?.()
-    return
-  }
-
-  const requestId = globalThis.crypto.randomUUID()
-  await new Promise<void>((resolve, reject) => {
-    const timer = globalThis.setTimeout(() => {
-      webview.removeEventListener?.('message', onMessage)
-      reject(new Error('Application restart request timed out'))
-    }, 10_000)
-    const onMessage = (event: DesktopWebViewMessageEvent): void => {
-      if (!isMessageRecord(event.data) || event.data.type !== 'dsh-hub-result'
-        || event.data.requestId !== requestId) return
-      globalThis.clearTimeout(timer)
-      webview.removeEventListener?.('message', onMessage)
-      if (event.data.ok === true) resolve()
-      else reject(new Error(typeof event.data.message === 'string' ? event.data.message : 'Application restart failed'))
-    }
-    webview.addEventListener?.('message', onMessage)
-    webview.postMessage({ type: 'dsh-hub-request', requestId, operation: 'app-reload', payload: {} })
-  })
-}
-
-function renderClientEntryFailures(failures: readonly ClientEntryFailure[]): string {
-  const rows = failures.map((failure) => {
-    if (failure.state === 'import-failed') {
-      return `${failure.name}: import failed (see console for the import error)`
-    }
-    if (failure.state === 'pending') {
-      const services = failure.missingServices.join(', ') || 'unknown'
-      return `${failure.name}: pending (waiting for service${failure.missingServices.length === 1 ? '' : 's'}: ${services})`
-    }
-    return `${failure.name}: ${failure.state}`
-  })
-  return `web boot: ${String(failures.length)} entr${failures.length === 1 ? 'y' : 'ies'} did not activate\n${rows.join('\n')}`
-}
-
-class ClientEntryActivationError extends Error {
-  readonly failures: ClientEntryFailure[]
-  readonly retryable: boolean
-
-  constructor(failures: ClientEntryFailure[]) {
-    super(renderClientEntryFailures(failures))
-    this.name = 'ClientEntryActivationError'
-    this.failures = failures
-    this.retryable = failures.length > 0 && failures.every(failure => failure.state === 'pending')
-  }
-}
-
-/**
- * Wait briefly for entry fibers whose required services are supplied by child
- * plugins created after their owning entry root has settled.
- * @param ctx - Client Loader context whose entries must activate.
- * @param timeoutMs - Maximum grace period before the caller performs its loud audit.
- * @returns once no entry is pending lifecycle work, or the grace period expires.
- */
-export async function awaitClientEntriesActive(ctx: Context, timeoutMs = 30_000): Promise<void> {
-  const waiting = (): boolean => [...ctx.loader.entries()].some((entry) => {
-    if (entry.fiber === undefined) return false
-    const state = STATE_LABELS[entry.fiber.state]
-    return state === 'pending' || state === 'loading' || state === 'unloading'
-  })
-  if (!waiting()) return
-
-  await new Promise<void>((resolve) => {
-    let done = false
-    const handles: { timer?: ReturnType<typeof setTimeout>; dispose?: () => boolean } = {}
-    const finish = (): void => {
-      if (done) return
-      done = true
-      if (handles.timer !== undefined) clearTimeout(handles.timer)
-      handles.dispose?.()
-      resolve()
-    }
-    const check = (): void => {
-      if (!waiting()) finish()
-    }
-    handles.dispose = ctx.on('internal/status', check)
-    handles.timer = setTimeout(finish, timeoutMs)
-    check()
-  })
-}
 
 /**
  * The web shell kernel: mounts the loading page into a DOM element and runs
@@ -255,8 +76,6 @@ export class AppWebEntry {
   private modules!: ClientModuleSystem
   private manifest!: BootManifest
   private root: Root | undefined
-  private desktopBootHeartbeat: ReturnType<typeof setInterval> | undefined
-  private desktopBootStage = 'Preparing Web UI'
 
   /**
    * Hold the mount point; all work happens in {@link run}.
@@ -268,27 +87,6 @@ export class AppWebEntry {
     this.seams = seams
   }
 
-  private setDesktopBootStage(stage: string): void {
-    this.desktopBootStage = stage
-    publishDesktopBootStatus({
-      state: 'loading', retryable: false, failures: [], message: stage,
-    })
-  }
-
-  private startDesktopBootHeartbeat(): void {
-    if (this.desktopBootHeartbeat !== undefined) return
-    this.setDesktopBootStage(this.desktopBootStage)
-    this.desktopBootHeartbeat = globalThis.setInterval(() => {
-      this.setDesktopBootStage(this.desktopBootStage)
-    }, DESKTOP_BOOT_HEARTBEAT_MILLISECONDS)
-  }
-
-  private stopDesktopBootHeartbeat(): void {
-    if (this.desktopBootHeartbeat === undefined) return
-    globalThis.clearInterval(this.desktopBootHeartbeat)
-    this.desktopBootHeartbeat = undefined
-  }
-
   /**
    * Run the boot chain to settlement. Boot-chain failures resolve (not
    * reject): the loading page stays up and renders the failure report (the
@@ -297,15 +95,7 @@ export class AppWebEntry {
    * @returns resolves once the UI settled or the failure report rendered.
    */
   async run(): Promise<void> {
-    this.startDesktopBootHeartbeat()
-    try {
-      this.manifest = parseBootManifest((globalThis as DshWindow).__DSH_BOOT__)
-      this.setDesktopBootStage('Web UI manifest ready')
-    } catch (reason) {
-      this.publishBootFailure(reason)
-      this.stopDesktopBootHeartbeat()
-      throw reason
-    }
+    this.manifest = parseBootManifest((globalThis as DshWindow).__DSH_BOOT__)
 
     this.modules = new ClientModuleSystem({
       modules: this.manifest.modules, staticModules: getStaticModules(), ...this.seams,
@@ -327,7 +117,6 @@ export class AppWebEntry {
         settled={this.settled}
         status={this.status}
         error={this.error}
-        restartApplication={requestApplicationRestart}
         renderApp={() => {
           const shell = this.ctx.get('appShell')
           // Unreachable after a clean settle (the app-shell entry is in every graph).
@@ -344,24 +133,17 @@ export class AppWebEntry {
     const prefetching = this.prefetchImmediateTier()
     this.ctx = new Context()
     try {
-      this.setDesktopBootStage('Activating Web UI plugins')
       await this.runPluginBoot(prefetching)
       this.settled.set(true)
-      publishDesktopBootStatus({ state: 'ready', retryable: false, failures: [] })
-      this.stopDesktopBootHeartbeat()
     } catch (reason) {
       // Stay on the loading page; surface the sweep report (fail loud).
       console.error(reason)
-      const message = reason instanceof Error ? reason.message : String(reason)
-      this.error.set(message)
-      this.publishBootFailure(reason)
-      this.stopDesktopBootHeartbeat()
+      this.error.set(reason instanceof Error ? reason.message : String(reason))
     }
   }
 
   /** Unmount the shell (loading page or settled UI). */
   dispose(): void {
-    this.stopDesktopBootHeartbeat()
     this.root?.unmount()
   }
 
@@ -398,9 +180,7 @@ export class AppWebEntry {
     // and materialization runs synchronous cross-package require edges that
     // need every immediately-tier factory already registered (module
     // comment). Resolves even when individual prefetches failed.
-    this.setDesktopBootStage('Prefetching browser bundles')
     await prefetching
-    this.setDesktopBootStage('Creating Web UI plugins')
 
     // Adoption handoff, plugin side: the modules entry is created first —
     // its wrapper apply reads the kernel slot and provides ctx.modules (the
@@ -424,9 +204,6 @@ export class AppWebEntry {
     }))
 
     await loader.await()
-    this.setDesktopBootStage('Waiting for plugin services')
-    await awaitClientEntriesActive(ctx, DESKTOP_BOOT_ACTIVATION_TIMEOUT_MILLISECONDS)
-    this.setDesktopBootStage('Checking plugin activation')
     this.assertEntriesActive()
   }
 
@@ -437,20 +214,25 @@ export class AppWebEntry {
    * timeout, so this sweep is the fail-loud compensation).
    */
   private assertEntriesActive(): void {
-    const failures = collectClientEntryFailures(this.ctx)
-    if (failures.length > 0) {
-      throw new ClientEntryActivationError(failures)
+    const ctx = this.ctx
+    const failures: string[] = []
+    for (const entry of ctx.loader.entries()) {
+      const name = entry.options.name
+      if (entry.fiber === undefined) {
+        failures.push(`${name}: import failed (see console for the import error)`)
+        continue
+      }
+      const state = STATE_LABELS[entry.fiber.state]
+      if (state === 'active') continue
+      if (state === 'pending') {
+        const missing = Object.keys(entry.fiber.inject).filter(service => ctx.get(service) === undefined)
+        failures.push(`${name}: pending (waiting for service${missing.length === 1 ? '' : 's'}: ${missing.join(', ') || 'unknown'})`)
+      } else {
+        failures.push(`${name}: ${state}`)
+      }
     }
-  }
-
-  private publishBootFailure(reason: unknown): void {
-    const message = reason instanceof Error ? reason.message : String(reason)
-    const activation = reason instanceof ClientEntryActivationError ? reason : undefined
-    publishDesktopBootStatus({
-      state: 'failed',
-      retryable: activation?.retryable ?? false,
-      failures: activation?.failures ?? [{ name: 'web-shell', state: 'failed', missingServices: [] }],
-      message,
-    })
+    if (failures.length > 0) {
+      throw new Error(`web boot: ${String(failures.length)} entr${failures.length === 1 ? 'y' : 'ies'} did not activate\n${failures.join('\n')}`)
+    }
   }
 }

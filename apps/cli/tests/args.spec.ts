@@ -57,15 +57,6 @@ describe('parseDshArgs', () => {
       .toEqual({ mode: 'plugin', profile: 'tui', args: ['add', '--save-dev', 'x'] })
   })
 
-  it('routes Setup inspection and installation', () => {
-    expect(parse(['setup', 'inspect', './setup.json']))
-      .toEqual({ mode: 'setup', action: 'inspect', manifest: './setup.json', acceptSource: false, acceptUnverified: false, silent: false, json: false })
-    expect(parse(['setup', 'inspect', 'https://example.com/setup.json', '--json']))
-      .toEqual({ mode: 'setup', action: 'inspect', manifest: 'https://example.com/setup.json', acceptSource: false, acceptUnverified: false, silent: false, json: true })
-    expect(parse(['setup', 'install', './setup.json', '--profile', 'web', '--accept-source', '--silent']))
-      .toEqual({ mode: 'setup', action: 'install', manifest: './setup.json', profile: 'web', acceptSource: true, acceptUnverified: false, silent: true, json: false })
-  })
-
   it('routes profile and web config dumps', () => {
     expect(parse(['--profile', 'web', '--dump-config']))
       .toEqual({ mode: 'dump-config', profile: 'web', defaultOnly: false, patches: [] })
@@ -105,11 +96,6 @@ describe('parseDshArgs', () => {
     expect(exitCode(['plugin', '--profile', 'tui'])).toBe(1) // nothing to forward
     expect(exitCode(['plugin', '--profile', ''])).toBe(1)
     expect(exitCode(['--profile', 'x', 'plugin', 'add', 'y'])).toBe(1)
-    expect(exitCode(['setup'])).toBe(1)
-    expect(exitCode(['setup', 'inspect'])).toBe(1)
-    expect(exitCode(['setup', 'install'])).toBe(1)
-    expect(exitCode(['setup', 'install', './setup.json', '--profile', ''])).toBe(1)
-    expect(exitCode(['--profile', 'x', 'setup', 'inspect', './setup.json'])).toBe(1)
   })
 
   it('keeps its own help for an invocation with no app to hand it to', () => {
