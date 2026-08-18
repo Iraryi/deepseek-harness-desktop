@@ -88,6 +88,75 @@ function New-HubIcon([string]$path) {
     $file.Dispose()
 }
 
+function New-ConfigIcon([string]$path) {
+    Add-Type -AssemblyName System.Drawing
+    $sizes = @(16, 24, 32, 48, 64, 256)
+    $images = [Collections.Generic.List[byte[]]]::new()
+    foreach ($size in $sizes) {
+        $bitmap = [Drawing.Bitmap]::new($size, $size, [Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        $graphics = [Drawing.Graphics]::FromImage($bitmap)
+        $graphics.SmoothingMode = [Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        $graphics.Clear([Drawing.Color]::Transparent)
+        $rectangle = [Drawing.RectangleF]::new(0.5, 0.5, $size - 1, $size - 1)
+        $shape = New-RoundedRectanglePath $rectangle ([Math]::Max(2, $size * 0.2))
+        $background = [Drawing.Drawing2D.LinearGradientBrush]::new(
+            $rectangle,
+            [Drawing.Color]::FromArgb(109, 40, 217),
+            [Drawing.Color]::FromArgb(37, 99, 235),
+            42)
+        $graphics.FillPath($background, $shape)
+
+        $center = $size / 2.0
+        $outerRadius = [Math]::Max(2.5, $size * 0.31)
+        $innerRadius = [Math]::Max(1.5, $size * 0.20)
+        $points = New-Object 'System.Drawing.PointF[]' 32
+        for ($index = 0; $index -lt 32; $index++) {
+            $angle = -[Math]::PI / 2 + $index * [Math]::PI / 16
+            $radius = if (($index % 4) -lt 2) { $outerRadius } else { $outerRadius * 0.78 }
+            $points[$index] = [Drawing.PointF]::new(
+                [float]($center + [Math]::Cos($angle) * $radius),
+                [float]($center + [Math]::Sin($angle) * $radius))
+        }
+        $graphics.FillPolygon([Drawing.Brushes]::White, $points)
+        $graphics.FillEllipse(
+            [Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(62, 93, 220)),
+            [float]($center - $innerRadius), [float]($center - $innerRadius),
+            [float]($innerRadius * 2), [float]($innerRadius * 2))
+
+        $stream = [IO.MemoryStream]::new()
+        $bitmap.Save($stream, [Drawing.Imaging.ImageFormat]::Png)
+        $images.Add($stream.ToArray())
+        $stream.Dispose()
+        $background.Dispose()
+        $shape.Dispose()
+        $graphics.Dispose()
+        $bitmap.Dispose()
+    }
+
+    $file = [IO.File]::Create($path)
+    $writer = [IO.BinaryWriter]::new($file)
+    $writer.Write([UInt16]0)
+    $writer.Write([UInt16]1)
+    $writer.Write([UInt16]$sizes.Count)
+    $offset = 6 + (16 * $sizes.Count)
+    for ($index = 0; $index -lt $sizes.Count; $index++) {
+        $size = $sizes[$index]
+        $bytes = $images[$index]
+        $writer.Write([byte]$(if ($size -eq 256) { 0 } else { $size }))
+        $writer.Write([byte]$(if ($size -eq 256) { 0 } else { $size }))
+        $writer.Write([byte]0)
+        $writer.Write([byte]0)
+        $writer.Write([UInt16]1)
+        $writer.Write([UInt16]32)
+        $writer.Write([UInt32]$bytes.Length)
+        $writer.Write([UInt32]$offset)
+        $offset += $bytes.Length
+    }
+    foreach ($bytes in $images) { $writer.Write($bytes) }
+    $writer.Dispose()
+    $file.Dispose()
+}
+
 $repository = [IO.Path]::GetFullPath((Join-Path $launcherRoot '..\..'))
 $package = Get-Content (Join-Path $repository 'package.json') -Raw | ConvertFrom-Json
 $version = [string]$package.version
@@ -131,7 +200,9 @@ $source = Join-Path $launcherRoot 'src'
 $webViewLib = Join-Path $packageDirectory 'lib\net462'
 $icon = Join-Path $launcherRoot 'assets\dsh.ico'
 $hubIcon = Join-Path $output 'dsh-hub.ico'
+$configIcon = Join-Path $output 'dsh-config.ico'
 New-HubIcon $hubIcon
+New-ConfigIcon $configIcon
 $commonSources = @(
     (Join-Path $source 'AssemblyInfo.cs'),
     $generatedAssembly,
@@ -157,7 +228,7 @@ if ($LASTEXITCODE -ne 0) { throw "dsh.exe compilation failed: $LASTEXITCODE" }
     "/reference:$webViewLib\Microsoft.Web.WebView2.WinForms.dll" @commonSources (Join-Path $source 'MainApp.cs')
 if ($LASTEXITCODE -ne 0) { throw "dsh-hub.exe compilation failed: $LASTEXITCODE" }
 
-& $compiler /nologo /target:winexe /platform:x64 /optimize+ "/win32icon:$icon" "/out:$output\dsh-config.exe" `
+& $compiler /nologo /target:winexe /platform:x64 /optimize+ "/win32icon:$configIcon" "/out:$output\dsh-config.exe" `
     @commonReferences @commonSources (Join-Path $source 'ConfigApp.cs')
 if ($LASTEXITCODE -ne 0) { throw "dsh-config.exe compilation failed: $LASTEXITCODE" }
 
@@ -169,6 +240,7 @@ Copy-Item (Join-Path $launcherRoot 'assets\dshmk-catalog.json') $output
 Copy-Item (Join-Path $launcherRoot 'assets\THIRD-PARTY-NOTICES.txt') $output
 Remove-Item -LiteralPath $generatedAssembly -Force
 Remove-Item -LiteralPath $hubIcon -Force
+Remove-Item -LiteralPath $configIcon -Force
 
 $expected = @('dsh.exe', 'dsh-hub.exe', 'dsh-config.exe', 'Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll', 'WebView2Loader.dll', 'community-registry.json', 'dshmk-catalog.json', 'THIRD-PARTY-NOTICES.txt')
 foreach ($name in $expected) {

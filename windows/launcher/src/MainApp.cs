@@ -74,6 +74,9 @@ internal sealed class ProcessJob : IDisposable
     private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
 
     [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool result);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool TerminateJobObject(IntPtr job, uint exitCode);
 
     [DllImport("kernel32.dll", SetLastError = true)]
@@ -101,6 +104,14 @@ internal sealed class ProcessJob : IDisposable
         if (_handle == IntPtr.Zero) throw new ObjectDisposedException("ProcessJob");
         if (!AssignProcessToJobObject(_handle, process.Handle))
             throw new Win32Exception(Marshal.GetLastWin32Error());
+    }
+
+    public static bool IsCurrentProcessInJob()
+    {
+        bool result;
+        if (!IsProcessInJob(Process.GetCurrentProcess().Handle, IntPtr.Zero, out result))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        return result;
     }
 
     public void Terminate(uint exitCode)
@@ -147,7 +158,7 @@ internal static class Program
         Application.SetCompatibleTextRenderingDefault(false);
         AppConfig config = AppConfig.Load();
         HubConfig hubConfig = HubConfig.Load();
-        string productName = hubMode ? "DSH HUB" : "DeepSeek Harness";
+        string productName = hubMode ? "HUB" : "DSH";
         bool silentActivation = Array.Exists(Environment.GetCommandLineArgs(), delegate(string argument)
         {
             return string.Equals(argument, "--activate-silent", StringComparison.OrdinalIgnoreCase);
@@ -191,7 +202,7 @@ internal static class Program
                 else
                 {
                     MessageBox.Show("First-time setup requires dsh-config.exe next to dsh.exe.",
-                        "DeepSeek Harness", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        "DSH", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
                 return;
             }
@@ -237,7 +248,7 @@ internal sealed class LoadingOverlay : Control
     public LoadingOverlay(string style, string productName)
     {
         _style = style;
-        _productName = string.IsNullOrEmpty(productName) ? "DeepSeek Harness" : productName;
+        _productName = string.IsNullOrEmpty(productName) ? "DSH" : productName;
         _stage = "Preparing application";
         _progress = 4F;
         _targetProgress = 8F;
@@ -678,7 +689,6 @@ internal sealed class MainForm : Form
         public TaskCompletionSource<CommunityArtifactInfo> Imported;
     }
 
-    private const string BakedRepo = @"C:\Users\65428\Documents\Codex\2026-08-14\new-chat\deepseek-harness";
     private const int MaxWebMessageCharacters = 4 * 1024 * 1024;
     private const int MaxCommunityRegistryCharacters = 8 * 1024 * 1024;
     private const int MaxDshmkCatalogCharacters = 16 * 1024 * 1024;
@@ -688,17 +698,23 @@ internal sealed class MainForm : Form
     private const string DshmkCatalogRawUrl = "https://raw.githubusercontent.com/ZASENJC/dsh-plugins-store/main/src/data/catalog.json";
     private const int MaxWebUiRetries = 1;
     private const int MaxWebUiServiceRecoveries = 1;
-    private const int WebUiStatusTimeoutMilliseconds = 45000;
-    private const int WebUiRetryStatusTimeoutMilliseconds = 20000;
+    private const int WebUiStatusIdleTimeoutMilliseconds = 45000;
+    private const int WebUiRetryStatusIdleTimeoutMilliseconds = 30000;
+    private const int WebUiStatusHardTimeoutMilliseconds = 120000;
+    private const int WebUiRetryStatusHardTimeoutMilliseconds = 60000;
     private const int ShowWindowRestore = 9;
     private const int ExtendedWindowStyle = -20;
     private const int WindowOwner = -8;
     private const long AppWindowStyle = 0x00040000L;
     private const long ToolWindowStyle = 0x00000080L;
+    private const long TopMostWindowStyle = 0x00000008L;
     private const uint SetWindowPositionNoMove = 0x0002;
     private const uint SetWindowPositionNoSize = 0x0001;
     private const uint SetWindowPositionNoZOrder = 0x0004;
     private const uint SetWindowPositionFrameChanged = 0x0020;
+    private const uint SetWindowPositionShowWindow = 0x0040;
+    private static readonly IntPtr WindowTopMost = new IntPtr(-1);
+    private static readonly IntPtr WindowNoTopMost = new IntPtr(-2);
     private const string SetupProgressPrefix = "DSH_SETUP_PROGRESS ";
     private const string DesktopMarketCompatibilityCss =
         "[data-dsh-desktop-market='true'] [class$='_irow']{flex-wrap:wrap!important;align-items:center!important;justify-content:flex-end!important;gap:10px 12px!important;}"
@@ -727,6 +743,9 @@ internal sealed class MainForm : Form
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr window);
 
     [DllImport("user32.dll")]
     private static extern bool ShowWindowAsync(IntPtr window, int command);
@@ -810,6 +829,9 @@ internal sealed class MainForm : Form
     private int _webUiRetryCount;
     private int _webUiServiceRecoveryCount;
     private bool _preserveWebUiServiceRecoveryCount;
+    private DateTime _webUiBootStartedUtc;
+    private DateTime _webUiBootLastActivityUtc;
+    private string _webUiBootStage;
     private string _activeUrl;
     private string _navigationUrl;
     private string _desktopBootId;
@@ -867,10 +889,12 @@ internal sealed class MainForm : Form
         if (headlessDataMode) return;
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
         catch { Icon = SystemIcons.Application; }
+        ApplyLaunchMode(_hubMode ? "window" : _cfg.LaunchMode);
         BuildUi();
         try
         {
             _serverJob = new ProcessJob();
+            AppendLog("Launcher process job state: " + (ProcessJob.IsCurrentProcessInJob() ? "inherited external job" : "standalone"));
         }
         catch (Exception ex)
         {
@@ -907,6 +931,8 @@ internal sealed class MainForm : Form
         AutoScaleMode = AutoScaleMode.None;
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Microsoft YaHei UI", 9F);
+        DoubleBuffered = true;
+        Opacity = 0D;
 
         _webView = new WebView2();
         _webView.Dock = DockStyle.Fill;
@@ -991,7 +1017,7 @@ internal sealed class MainForm : Form
         _toolbarSticky = !_cfg.ToolbarAutoHide;
         _toolbarTargetVisible = _toolbarSticky;
         PositionTrayButton();
-        RequestToolbar(_toolbarSticky, true);
+        RequestToolbar(_forceToolbarVisible || _toolbarSticky, true);
 
         SetupTrayIcon();
 
@@ -1058,18 +1084,35 @@ internal sealed class MainForm : Form
         Load += delegate
         {
             ApplyNativeTitleBarTheme();
-            ApplyLaunchMode(_hubMode ? "window" : _cfg.LaunchMode);
             EnsureTaskbarPresence();
         };
         Shown += delegate
         {
             EnsureTaskbarPresence();
-            RegisterActivationSignals();
-            PositionTrayButton();
-            SetLoadingStage("Preparing runtime", 12F);
-            BeginInvoke((MethodInvoker)BeginServerStart);
-            BeginInvoke((MethodInvoker)delegate { InitWebView(); });
-            BeginInvoke((MethodInvoker)ForceForegroundWindow);
+            BeginInvoke((MethodInvoker)delegate
+            {
+                if (IsDisposed || Disposing) return;
+                Refresh();
+                if (_loadingOverlay != null)
+                {
+                    _loadingOverlay.Refresh();
+                    _loadingOverlay.Update();
+                }
+                Update();
+                BeginInvoke((MethodInvoker)delegate
+                {
+                    if (IsDisposed || Disposing) return;
+                    Opacity = 1D;
+                    AppendLog("Initial window frame revealed");
+                    EnsureTaskbarPresence();
+                    RegisterActivationSignals();
+                    PositionTrayButton();
+                    SetLoadingStage("Preparing runtime", 12F);
+                    BeginInvoke((MethodInvoker)BeginServerStart);
+                    BeginInvoke((MethodInvoker)delegate { InitWebView(); });
+                    BeginInvoke((MethodInvoker)ForceForegroundWindow);
+                });
+            });
         };
         SetButtons();
     }
@@ -1092,9 +1135,10 @@ internal sealed class MainForm : Form
     private void SetupTrayIcon()
     {
         ContextMenuStrip menu = new ContextMenuStrip();
-        ToolStripMenuItem showItem = new ToolStripMenuItem("Show " + ProductDisplayName);
-        ToolStripMenuItem companionItem = new ToolStripMenuItem("Open " + CompanionDisplayName);
-        ToolStripMenuItem configItem = new ToolStripMenuItem(_cfg.Language == "zh-CN" ? "打开 CONFIG" : "Open Config");
+        bool chinese = _cfg.Language == "zh-CN";
+        ToolStripMenuItem showItem = new ToolStripMenuItem((chinese ? "显示 " : "Show ") + ProductDisplayName);
+        ToolStripMenuItem companionItem = new ToolStripMenuItem((chinese ? "打开 " : "Open ") + CompanionDisplayName);
+        ToolStripMenuItem configItem = new ToolStripMenuItem(chinese ? "打开 CONFIG" : "Open CONFIG");
         ToolStripMenuItem exitItem = new ToolStripMenuItem(_cfg.Language == "zh-CN" ? "退出" : "Exit");
         showItem.Click += delegate { RestoreFromTray(); };
         companionItem.Click += delegate { OpenCompanionApp(); };
@@ -1286,26 +1330,41 @@ internal sealed class MainForm : Form
     private void ForceForegroundWindow()
     {
         if (_exitRequested || IsDisposed || !IsHandleCreated) return;
+        Show();
+        EnsureTaskbarPresence();
+        RaiseWindowToForeground(Handle);
+        Activate();
+        BringToFront();
+    }
+
+    private static void RaiseWindowToForeground(IntPtr window)
+    {
+        if (window == IntPtr.Zero) return;
         IntPtr foregroundWindow = GetForegroundWindow();
-        uint foregroundProcessId;
+        uint ignoredProcessId;
         uint foregroundThreadId = foregroundWindow == IntPtr.Zero
             ? 0
-            : GetWindowThreadProcessId(foregroundWindow, out foregroundProcessId);
+            : GetWindowThreadProcessId(foregroundWindow, out ignoredProcessId);
+        uint targetThreadId = GetWindowThreadProcessId(window, out ignoredProcessId);
         uint currentThreadId = GetCurrentThreadId();
-        bool attached = foregroundThreadId != 0 && foregroundThreadId != currentThreadId
+        bool attachedForeground = foregroundThreadId != 0 && foregroundThreadId != currentThreadId
             && AttachThreadInput(currentThreadId, foregroundThreadId, true);
+        bool attachedTarget = targetThreadId != 0 && targetThreadId != currentThreadId && targetThreadId != foregroundThreadId
+            && AttachThreadInput(currentThreadId, targetThreadId, true);
         try
         {
-            Show();
-            EnsureTaskbarPresence();
-            ShowWindowAsync(Handle, ShowWindowRestore);
-            Activate();
-            BringToFront();
-            SetForegroundWindow(Handle);
+            bool wasTopMost = (GetWindowLongPtr(window, ExtendedWindowStyle).ToInt64() & TopMostWindowStyle) != 0;
+            uint flags = SetWindowPositionNoMove | SetWindowPositionNoSize | SetWindowPositionShowWindow;
+            ShowWindowAsync(window, ShowWindowRestore);
+            SetWindowPos(window, WindowTopMost, 0, 0, 0, 0, flags);
+            BringWindowToTop(window);
+            SetForegroundWindow(window);
+            if (!wasTopMost) SetWindowPos(window, WindowNoTopMost, 0, 0, 0, 0, flags);
         }
         finally
         {
-            if (attached) AttachThreadInput(currentThreadId, foregroundThreadId, false);
+            if (attachedTarget) AttachThreadInput(currentThreadId, targetThreadId, false);
+            if (attachedForeground) AttachThreadInput(currentThreadId, foregroundThreadId, false);
         }
     }
 
@@ -1442,22 +1501,19 @@ internal sealed class MainForm : Form
         if (mode == "bordered")
         {
             FormBorderStyle = FormBorderStyle.Sizable;
-            TopMost = false;
-            WindowState = FormWindowState.Maximized;
+            TopMost = !_cfg.FullscreenShowTaskbar;
+            WindowState = FormWindowState.Normal;
+            StartPosition = FormStartPosition.Manual;
+            Bounds = _cfg.FullscreenShowTaskbar ? scr.WorkingArea : scr.Bounds;
+            if (_cfg.FullscreenShowTaskbar) WindowState = FormWindowState.Maximized;
         }
         else if (mode == "borderless")
         {
             FormBorderStyle = FormBorderStyle.None;
             TopMost = false;
-            if (_cfg.FullscreenShowTaskbar)
-            {
-                WindowState = FormWindowState.Normal;
-                Bounds = scr.WorkingArea;
-            }
-            else
-            {
-                WindowState = FormWindowState.Maximized;
-            }
+            WindowState = FormWindowState.Normal;
+            StartPosition = FormStartPosition.Manual;
+            Bounds = _cfg.FullscreenShowTaskbar ? scr.WorkingArea : scr.Bounds;
         }
         else if (mode == "exclusive")
         {
@@ -1470,8 +1526,11 @@ internal sealed class MainForm : Form
         {
             ApplyWindowMode(scr);
         }
-        _toolbarHideTicks = 0;
-        RequestToolbar(_forceToolbarVisible || _toolbarSticky, false);
+        if (_toolPanel != null)
+        {
+            _toolbarHideTicks = 0;
+            RequestToolbar(_forceToolbarVisible || _toolbarSticky, false);
+        }
         AppendLog("Launch mode: " + mode);
     }
 
@@ -1587,8 +1646,9 @@ internal sealed class MainForm : Form
                             e4.MenuItems.Add(_webView.CoreWebView2.Environment.CreateContextMenuItem(
                                 "", null, CoreWebView2ContextMenuItemKind.Separator));
                         }
+                        bool chinese = _cfg.Language == "zh-CN";
                         CoreWebView2ContextMenuItem configMenuItem = _webView.CoreWebView2.Environment.CreateContextMenuItem(
-                            "打开 DeepSeek Harness CONFIG", null, CoreWebView2ContextMenuItemKind.Command);
+                            chinese ? "打开 CONFIG" : "Open CONFIG", null, CoreWebView2ContextMenuItemKind.Command);
                         configMenuItem.CustomItemSelected += delegate
                         {
                             try { BeginInvoke((MethodInvoker)OpenConfigApp); }
@@ -1596,7 +1656,7 @@ internal sealed class MainForm : Form
                         };
                         e4.MenuItems.Add(configMenuItem);
                         CoreWebView2ContextMenuItem companionMenuItem = _webView.CoreWebView2.Environment.CreateContextMenuItem(
-                            _hubMode ? "打开 DeepSeek Harness 主程序" : "打开 DSH HUB",
+                            chinese ? (_hubMode ? "打开 DSH" : "打开 HUB") : (_hubMode ? "Open DSH" : "Open HUB"),
                             null, CoreWebView2ContextMenuItemKind.Command);
                         companionMenuItem.CustomItemSelected += delegate
                         {
@@ -1615,6 +1675,9 @@ internal sealed class MainForm : Form
                     if (string.Equals(e5.Uri, _navigationUrl, StringComparison.OrdinalIgnoreCase))
                     {
                         _activeNavigationId = e5.NavigationId;
+                        _webUiBootStartedUtc = DateTime.UtcNow;
+                        _webUiBootLastActivityUtc = _webUiBootStartedUtc;
+                        _webUiBootStage = "navigation started";
                     }
                 };
                 _webView.NavigationCompleted += delegate(object s6, CoreWebView2NavigationCompletedEventArgs e6)
@@ -1859,10 +1922,17 @@ internal sealed class MainForm : Form
         string state = GetString(envelope, "state");
         if (state == "loading")
         {
+            _webUiBootLastActivityUtc = DateTime.UtcNow;
+            string stage = LimitDiagnosticText(GetString(envelope, "message"), "activating Web UI plugins");
+            if (!string.Equals(stage, _webUiBootStage, StringComparison.Ordinal))
+            {
+                _webUiBootStage = stage;
+                AppendLog("Web UI boot progress: " + stage);
+            }
             if (!_webUiVerified && !_webUiBootTerminal)
             {
-                SetLoadingStage("Activating Web UI plugins", 92F);
-                SetStatus("Activating Web UI plugins", Color.FromArgb(180, 130, 20));
+                SetLoadingStage(stage, 92F);
+                SetStatus(stage, Color.FromArgb(180, 130, 20));
             }
             return;
         }
@@ -1909,6 +1979,9 @@ internal sealed class MainForm : Form
             _webUiBootTerminal = false;
             _activeNavigationId = 0;
             _navigationUrl = BuildNavigationUrl(_activeUrl, _hubMode, _hubConfig, out _desktopBootId);
+            _webUiBootStartedUtc = DateTime.UtcNow;
+            _webUiBootLastActivityUtc = _webUiBootStartedUtc;
+            _webUiBootStage = "retry navigation queued";
             SetLoadingStage("Retrying Web UI plugin activation", 94F);
             SetStatus("Retrying Web UI startup", Color.FromArgb(180, 130, 20));
             AppendLog("Retrying Web UI boot once with a fresh navigation token");
@@ -1928,6 +2001,7 @@ internal sealed class MainForm : Form
         }
 
         if (retryable && TryRecoverWebUiService(report)) return;
+        if (IsRecoverableWebUiAssetFailure(report) && TryRecoverWebUiAssetFailure(report)) return;
 
         _webUiBootTerminal = true;
         SetStatus("Plugin startup failed - check log", Color.FromArgb(190, 60, 60));
@@ -1984,7 +2058,8 @@ internal sealed class MainForm : Form
                 {
                     RestartHostedService(
                         "Restart requested after plugin changes; restarting the local service",
-                        "Restarting after plugin changes");
+                        "Restarting after plugin changes",
+                        true);
                 });
                 return;
             }
@@ -2011,7 +2086,7 @@ internal sealed class MainForm : Form
             else if (operation == "hub-open-path") { OpenHubPath(GetString(payload, "path")); data = new Dictionary<string, object>(); }
             else if (operation == "hub-create-draft") data = CreateSetupDraft(GetDictionary(payload, "repository"), serializer);
             else if (operation == "hub-delete-draft") { DeleteSetupDraft(GetString(payload, "id")); data = new Dictionary<string, object>(); }
-            else if (operation == "hub-uninstall") { await UninstallHubSetupAsync(GetString(payload, "id")); data = new Dictionary<string, object>(); }
+            else if (operation == "hub-uninstall") { await UninstallHubSetupAsync(requestId, GetString(payload, "id")); data = new Dictionary<string, object>(); }
             else throw new InvalidOperationException("Unknown HUB operation: " + LimitDiagnosticText(operation, "empty"));
             PostHubResult(requestId, true, data, "");
         }
@@ -2323,11 +2398,11 @@ internal sealed class MainForm : Form
         {
             localSnapshots.Sort(delegate(DshmkCatalogSnapshot left, DshmkCatalogSnapshot right)
             {
-                int generated = right.GeneratedAtUtc.CompareTo(left.GeneratedAtUtc);
-                if (generated != 0) return generated;
                 int installable = right.InstallableCount.CompareTo(left.InstallableCount);
                 if (installable != 0) return installable;
-                return right.RepositoryCount.CompareTo(left.RepositoryCount);
+                int repositories = right.RepositoryCount.CompareTo(left.RepositoryCount);
+                if (repositories != 0) return repositories;
+                return right.GeneratedAtUtc.CompareTo(left.GeneratedAtUtc);
             });
             DshmkCatalogSnapshot selected = localSnapshots[0];
             _dshmkCatalogCache = selected.Catalog;
@@ -3266,9 +3341,7 @@ internal sealed class MainForm : Form
 
     private static string SetupArtifactCachePath(string digest, string fileName)
     {
-        string home = Environment.GetEnvironmentVariable("DSH_HOME");
-        if (string.IsNullOrWhiteSpace(home)) home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".dsh");
-        return Path.Combine(Path.GetFullPath(home), "setup-cache", "artifacts", digest.ToLowerInvariant(), SafeCommunityFileName(fileName));
+        return Path.Combine(AppPaths.DshHome, "setup-cache", "artifacts", digest.ToLowerInvariant(), SafeCommunityFileName(fileName));
     }
 
     private async Task<Dictionary<string, object>> LoadCommunityRegistryAsync()
@@ -3947,30 +4020,53 @@ internal sealed class MainForm : Form
         WriteTextAtomic(HubInstalledFile, FormatJson(serializer.Serialize(records)));
     }
 
-    private async Task UninstallHubSetupAsync(string id)
+    private async Task UninstallHubSetupAsync(string requestId, string id)
     {
         if (string.IsNullOrEmpty(id)) throw new InvalidOperationException("Installed Setup id is missing.");
         List<Dictionary<string, object>> records = ReadInstalledRecords();
         Dictionary<string, object> record = records.Find(delegate(Dictionary<string, object> item) { return GetString(item, "id") == id; });
         if (record == null) throw new InvalidOperationException("Installed Setup record was not found.");
         if (!GetBoolean(record, "removable")) throw new InvalidOperationException("This Setup must be removed through Windows Apps & features.");
+        string displayName = GetString(record, "name");
+        if (string.IsNullOrEmpty(displayName)) displayName = id;
         string profile = GetString(record, "profile");
         if (string.IsNullOrEmpty(profile)) profile = "web";
         string method = GetString(record, "uninstallMethod");
+        string[] verificationNames;
+        bool verifyDependencies;
+        PostHubProgress(requestId, "preflight", 6, "正在读取组件安装记录。", displayName);
         if (method == "profile-bundle")
         {
-            RemoveBundlesFromProfile(profile, new string[] { GetString(record, "bundle") });
+            verificationNames = new string[] { GetString(record, "bundle") };
+            verifyDependencies = false;
+            PostHubProgress(requestId, "profile", 42, "正在从 Web Profile 移除 Bundle。", string.Join(", ", verificationNames));
+            RemoveBundlesFromProfile(profile, verificationNames);
         }
         else if (method == "profile-package")
         {
             string[] packages = GetRawStringArray(record, "packageNames");
             if (packages.Length == 0) throw new InvalidOperationException("No installed package name was recorded for this Setup.");
+            verificationNames = packages;
+            verifyDependencies = true;
+            PostHubProgress(requestId, "install", 28, "正在卸载组件依赖。", string.Join(", ", packages));
             await RemoveProfilePackagesAsync(profile, packages);
+            PostHubProgress(requestId, "profile", 72, "依赖已移除，正在更新 Web Profile。", ResolveProfileDirectory(profile));
             RemoveBundlesFromProfile(profile, packages);
         }
         else throw new InvalidOperationException("This Setup does not declare a safe HUB uninstall method.");
+        PostHubProgress(requestId, "activation", 86, "正在清理插件启动引用。", string.Join(", ", verificationNames));
+        HashSet<string> remainingBundles = ReadProfileBundles(profile);
+        HashSet<string> remainingDependencies = ReadProfileDependencies(profile);
+        foreach (string name in verificationNames)
+        {
+            if (string.IsNullOrEmpty(name)) continue;
+            if (remainingBundles.Contains(name)) throw new InvalidOperationException("The removed component is still present in the Profile bundle list: " + name);
+            if (verifyDependencies && remainingDependencies.Contains(name)) throw new InvalidOperationException("The removed component is still present in Profile dependencies: " + name);
+        }
+        PostHubProgress(requestId, "verify", 96, "正在核对卸载结果并更新组件记录。", displayName);
         records.Remove(record);
         WriteInstalledRecords(records);
+        PostHubProgress(requestId, "verify", 100, "组件卸载完成。", displayName);
     }
 
     private async Task RemoveProfilePackagesAsync(string profile, string[] packages)
@@ -4032,6 +4128,28 @@ internal sealed class MainForm : Form
         return dependencies;
     }
 
+    private static HashSet<string> ReadProfileBundles(string profile)
+    {
+        HashSet<string> bundles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string packageFile = Path.Combine(ResolveProfileDirectory(profile), "package.json");
+        if (!File.Exists(packageFile)) return bundles;
+        try
+        {
+            JavaScriptSerializer serializer = new JavaScriptSerializer();
+            Dictionary<string, object> package = serializer.DeserializeObject(File.ReadAllText(packageFile, Encoding.UTF8)) as Dictionary<string, object>;
+            Dictionary<string, object> dsh = GetDictionary(package, "dsh");
+            Dictionary<string, object> profileConfig = GetDictionary(dsh, "profile");
+            object[] values = GetArray(profileConfig, "bundles") ?? new object[0];
+            foreach (object value in values)
+            {
+                string name = value as string;
+                if (!string.IsNullOrEmpty(name)) bundles.Add(name);
+            }
+        }
+        catch { }
+        return bundles;
+    }
+
     private static void RemoveBundlesFromProfile(string profile, string[] packages)
     {
         string packageFile = Path.Combine(ResolveProfileDirectory(profile), "package.json");
@@ -4053,9 +4171,7 @@ internal sealed class MainForm : Form
     private static string ResolveProfileDirectory(string profile)
     {
         if (string.IsNullOrEmpty(profile) || profile.Contains("/") || profile.Contains("\\") || profile == "." || profile == "..") throw new InvalidOperationException("Invalid DSH profile name.");
-        string home = Environment.GetEnvironmentVariable("DSH_HOME");
-        if (string.IsNullOrWhiteSpace(home)) home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".dsh");
-        return Path.GetFullPath(Path.Combine(home, "profiles", profile));
+        return Path.GetFullPath(Path.Combine(AppPaths.DshHome, "profiles", profile));
     }
 
     private static string SetupOptionsSchemaJson()
@@ -4848,6 +4964,9 @@ internal sealed class MainForm : Form
         _webUiBootTerminal = false;
         _webUiRetryCount = 0;
         if (!preserveRecoveryCount) _webUiServiceRecoveryCount = 0;
+        _webUiBootStartedUtc = DateTime.MinValue;
+        _webUiBootLastActivityUtc = DateTime.MinValue;
+        _webUiBootStage = "waiting for navigation";
         _activeNavigationId = 0;
         _activePort = _cfg.Port;
         _activeUrl = _cfg.Url;
@@ -4939,6 +5058,9 @@ internal sealed class MainForm : Form
         psi.RedirectStandardError = true;
         psi.StandardOutputEncoding = Encoding.UTF8;
         psi.StandardErrorEncoding = Encoding.UTF8;
+        string desktopHome = AppPaths.DshHome;
+        Directory.CreateDirectory(desktopHome);
+        psi.EnvironmentVariables["DSH_HOME"] = desktopHome;
         if (_hubMode && !_hubConfig.AllowDesktopPlugins)
         {
             string isolatedHubHome = Path.Combine(HubRoot, "runtime-home");
@@ -4949,6 +5071,10 @@ internal sealed class MainForm : Form
         else if (_hubMode)
         {
             AppendLog("DSH HUB is sharing the Desktop Web Profile by explicit CONFIG opt-in");
+        }
+        else
+        {
+            AppendLog("Desktop is using Web Profile home: " + desktopHome);
         }
 
         Process serverProcess = new Process();
@@ -4983,10 +5109,19 @@ internal sealed class MainForm : Form
         };
         try
         {
-            if (_serverJob == null)
-                throw new InvalidOperationException("Windows process containment could not be initialized");
+            if (_serverJob == null) _serverJob = new ProcessJob();
             serverProcess.Start();
-            _serverJob.Assign(serverProcess);
+            AppendLog("Local service process started: PID " + serverProcess.Id);
+            try
+            {
+                _serverJob.Assign(serverProcess);
+                AppendLog("Local service process assigned to containment job");
+            }
+            catch (Win32Exception ex)
+            {
+                if (ex.NativeErrorCode != 5) throw;
+                AppendLog("Local service containment skipped after inherited Job access denial; explicit shutdown cleanup remains active");
+            }
             serverProcess.BeginOutputReadLine();
             serverProcess.BeginErrorReadLine();
             SetLoadingStage("Waiting for local service", 56F);
@@ -5080,18 +5215,31 @@ internal sealed class MainForm : Form
 
     private async void WaitForWebUiBootStatus(string bootId)
     {
-        int timeout = _webUiRetryCount > 0
-            ? WebUiRetryStatusTimeoutMilliseconds
-            : WebUiStatusTimeoutMilliseconds;
-        await Task.Delay(timeout);
-        if (_exitRequested || _shuttingDown || !_serviceReady || _webUiVerified || _webUiBootTerminal) return;
-        if (!string.Equals(bootId, _desktopBootId, StringComparison.Ordinal)) return;
-        string reason = _webUiRetryCount > 0
-            ? "fresh navigation did not settle within " + timeout + " ms"
-            : "no structured boot result arrived within " + timeout + " ms";
+        int idleTimeout = _webUiRetryCount > 0
+            ? WebUiRetryStatusIdleTimeoutMilliseconds
+            : WebUiStatusIdleTimeoutMilliseconds;
+        int hardTimeout = _webUiRetryCount > 0
+            ? WebUiRetryStatusHardTimeoutMilliseconds
+            : WebUiStatusHardTimeoutMilliseconds;
+        DateTime started = _webUiBootStartedUtc == DateTime.MinValue ? DateTime.UtcNow : _webUiBootStartedUtc;
+        if (_webUiBootLastActivityUtc == DateTime.MinValue) _webUiBootLastActivityUtc = started;
+        while (true)
+        {
+            await Task.Delay(1000);
+            if (_exitRequested || _shuttingDown || !_serviceReady || _webUiVerified || _webUiBootTerminal) return;
+            if (!string.Equals(bootId, _desktopBootId, StringComparison.Ordinal)) return;
+            DateTime now = DateTime.UtcNow;
+            if ((now - started).TotalMilliseconds >= hardTimeout) break;
+            if ((now - _webUiBootLastActivityUtc).TotalMilliseconds >= idleTimeout) break;
+        }
+        DateTime timedOutAt = DateTime.UtcNow;
+        bool hardLimit = (timedOutAt - started).TotalMilliseconds >= hardTimeout;
+        string reason = hardLimit
+            ? "Web UI boot did not settle within the " + hardTimeout + " ms hard limit; last stage: " + _webUiBootStage
+            : "Web UI boot reported no progress for " + idleTimeout + " ms; last stage: " + _webUiBootStage;
         if (TryRecoverWebUiService(reason)) return;
         _webUiBootTerminal = true;
-        AppendLog("Web UI boot status timed out without an explicit ready or failed message");
+        AppendLog("Web UI boot status timed out: " + reason);
         SetStatus("Plugin startup timeout - check log", Color.FromArgb(190, 60, 60));
         if (_loadingOverlay != null) _loadingOverlay.ShowError("Plugin startup verification timed out");
         CompleteHostedServiceRestart();
@@ -5112,6 +5260,40 @@ internal sealed class MainForm : Form
         return RestartHostedService(
             "Restarting local service once to recover Web UI plugin activation: " + detail,
             "Restarting local service to recover plugins");
+    }
+
+    private static bool IsRecoverableWebUiAssetFailure(string reason)
+    {
+        if (string.IsNullOrEmpty(reason)) return false;
+        bool loaderFailure = reason.IndexOf("failed to import loader entry", StringComparison.OrdinalIgnoreCase) >= 0;
+        bool clientFailure = reason.IndexOf("client-modules", StringComparison.OrdinalIgnoreCase) >= 0
+            || reason.IndexOf("bundle script", StringComparison.OrdinalIgnoreCase) >= 0;
+        bool loadFailure = reason.IndexOf("failed to load", StringComparison.OrdinalIgnoreCase) >= 0;
+        return loaderFailure && clientFailure && loadFailure;
+    }
+
+    private bool TryRecoverWebUiAssetFailure(string reason)
+    {
+        if (_webUiServiceRecoveryCount >= MaxWebUiServiceRecoveries || _exitRequested || _shuttingDown || !_serviceReady)
+            return false;
+        _webUiServiceRecoveryCount++;
+        _preserveWebUiServiceRecoveryCount = true;
+        _webUiVerified = false;
+        _webUiBootTerminal = false;
+        _webUiRetryCount = 0;
+        _activeNavigationId = 0;
+        string detail = LimitDiagnosticText(reason, "stale plugin client assets");
+        SetLoadingStage("Refreshing Web UI plugin assets", 96F);
+        bool started = RestartHostedService(
+            "Refreshing WebView plugin caches after a client bundle load failure: " + detail,
+            "Refreshing plugin assets",
+            true);
+        if (!started)
+        {
+            _webUiServiceRecoveryCount--;
+            _preserveWebUiServiceRecoveryCount = false;
+        }
+        return started;
     }
 
     private void RefreshPage()
@@ -5141,16 +5323,17 @@ internal sealed class MainForm : Form
         SetLoadingStage("Reloading installed plugins", 28F);
         RestartHostedService(
             "Reload requested after HUB installation; restarting the Desktop service",
-            "Reloading installed plugins");
+            "Reloading installed plugins",
+            true);
     }
 
-    private bool RestartHostedService(string logMessage, string statusMessage)
+    private bool RestartHostedService(string logMessage, string statusMessage, bool clearPluginAssets = false)
     {
         if (InvokeRequired)
         {
             try
             {
-                BeginInvoke((MethodInvoker)delegate { RestartHostedService(logMessage, statusMessage); });
+                BeginInvoke((MethodInvoker)delegate { RestartHostedService(logMessage, statusMessage, clearPluginAssets); });
                 return true;
             }
             catch
@@ -5167,6 +5350,40 @@ internal sealed class MainForm : Form
         AppendLog(logMessage);
         SetStatus(statusMessage, Color.FromArgb(180, 130, 20));
         if (_restartOverlay != null) _restartOverlay.ShowRestarting();
+        if (clearPluginAssets) ClearWebUiPluginAssetsAndQueueRestart();
+        else QueueHostedServiceRestart();
+        return true;
+    }
+
+    private async void ClearWebUiPluginAssetsAndQueueRestart()
+    {
+        try
+        {
+            if (_webView != null && !_webView.IsDisposed && _webView.CoreWebView2 != null)
+            {
+                try { _webView.CoreWebView2.Navigate("about:blank"); }
+                catch { }
+                CoreWebView2BrowsingDataKinds kinds = CoreWebView2BrowsingDataKinds.DiskCache
+                    | CoreWebView2BrowsingDataKinds.CacheStorage
+                    | CoreWebView2BrowsingDataKinds.ServiceWorkers;
+                await _webView.CoreWebView2.Profile.ClearBrowsingDataAsync(kinds);
+                AppendLog("Cleared WebView plugin cache, cache storage, and service workers before restart");
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog("WebView plugin cache cleanup failed; continuing with service restart: " + ex.Message);
+        }
+        if (_exitRequested || IsDisposed || Disposing)
+        {
+            CompleteHostedServiceRestart();
+            return;
+        }
+        QueueHostedServiceRestart();
+    }
+
+    private void QueueHostedServiceRestart()
+    {
         ThreadPool.QueueUserWorkItem(delegate
         {
             StopServer();
@@ -5186,7 +5403,6 @@ internal sealed class MainForm : Form
             {
             }
         });
-        return true;
     }
 
     private void CompleteHostedServiceRestart()
@@ -5252,17 +5468,17 @@ internal sealed class MainForm : Form
 
     private void OpenHubApp()
     {
-        OpenSiblingApp("dsh-hub.exe", "DSH HUB");
+        OpenSiblingApp("dsh-hub.exe", "HUB");
     }
 
     private void OpenMainApp()
     {
-        OpenSiblingApp("dsh.exe", "DeepSeek Harness");
+        OpenSiblingApp("dsh.exe", "DSH");
     }
 
     private bool RequestDesktopReload()
     {
-        return OpenSiblingApp("dsh.exe", "DeepSeek Harness", "--reload-silent");
+        return OpenSiblingApp("dsh.exe", "DSH", "--reload-silent");
     }
 
     private bool OpenSiblingApp(string executableName, string displayName, string arguments = "--activate-silent")
@@ -5295,7 +5511,7 @@ internal sealed class MainForm : Form
         }
     }
 
-    private static void ActivateExternalProcess(Process process)
+    private void ActivateExternalProcess(Process process)
     {
         if (process == null) return;
         try { AllowSetForegroundWindow(process.Id); }
@@ -5313,8 +5529,17 @@ internal sealed class MainForm : Form
                     IntPtr window = process.MainWindowHandle;
                     if (window != IntPtr.Zero)
                     {
-                        ShowWindowAsync(window, ShowWindowRestore);
-                        SetForegroundWindow(window);
+                        try
+                        {
+                            BeginInvoke((MethodInvoker)delegate
+                            {
+                                if (_exitRequested || IsDisposed || Disposing) return;
+                                RaiseWindowToForeground(window);
+                            });
+                        }
+                        catch
+                        {
+                        }
                         return;
                     }
                     Thread.Sleep(100);
@@ -5357,13 +5582,19 @@ internal sealed class MainForm : Form
         {
             _serviceStartWaiting = false;
             ReleaseServiceStartGate();
+            ProcessJob serverJob = _serverJob;
+            _serverJob = null;
             try
             {
-                if (_serverJob != null) _serverJob.Terminate(1);
+                if (serverJob != null) serverJob.Terminate(1);
             }
             catch (Exception ex)
             {
                 AppendLog("Job termination failed: " + ex.Message);
+            }
+            finally
+            {
+                if (serverJob != null) serverJob.Dispose();
             }
 
             if (serverProcess != null)
@@ -5396,6 +5627,14 @@ internal sealed class MainForm : Form
                     }
                 }
                 serverProcess.Dispose();
+            }
+
+            if (hadRunningServer && _activePort > 0)
+            {
+                if (WaitForPortToClose(_activePort, 5000))
+                    AppendLog("Released local service port " + _activePort);
+                else
+                    AppendLog("Local service port " + _activePort + " remained occupied after shutdown");
             }
 
             _serviceReady = false;
@@ -5489,7 +5728,7 @@ internal sealed class MainForm : Form
         AppendLog(message);
         if (_loadingOverlay != null) _loadingOverlay.ShowError("Startup failed — open Config or the toolbar log");
         CompleteHostedServiceRestart();
-        MessageBox.Show(this, message, "DeepSeek Harness", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        MessageBox.Show(this, message, ProductDisplayName, MessageBoxButtons.OK, MessageBoxIcon.Error);
         SetButtons();
     }
 
@@ -5530,6 +5769,17 @@ internal sealed class MainForm : Form
             try { client.Close(); }
             catch { }
         }
+    }
+
+    private static bool WaitForPortToClose(int port, int timeoutMilliseconds)
+    {
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        while (stopwatch.ElapsedMilliseconds < timeoutMilliseconds)
+        {
+            if (!IsPortOpen(port)) return true;
+            Thread.Sleep(100);
+        }
+        return !IsPortOpen(port);
     }
 
     private static int FindAvailableLoopbackPort()
@@ -5599,12 +5849,12 @@ internal sealed class MainForm : Form
 
     private string ProductDisplayName
     {
-        get { return _hubMode ? "DSH HUB" : "DeepSeek Harness"; }
+        get { return _hubMode ? "HUB" : "DSH"; }
     }
 
     private string CompanionDisplayName
     {
-        get { return _hubMode ? "DeepSeek Harness" : "DSH HUB"; }
+        get { return _hubMode ? "DSH" : "HUB"; }
     }
 
     private string FindRepo()
@@ -5617,8 +5867,30 @@ internal sealed class MainForm : Form
         string bundledRuntime = Path.Combine(exeDir, "runtime");
         if (HasServerEntry(bundledRuntime)) return Path.GetFullPath(bundledRuntime);
         if (HasServerEntry(exeDir)) return Path.GetFullPath(exeDir);
-        if (HasServerEntry(BakedRepo)) return BakedRepo;
+        foreach (string candidate in GetDevelopmentRepositoryCandidates(exeDir))
+        {
+            if (HasServerEntry(candidate)) return Path.GetFullPath(candidate);
+        }
         return null;
+    }
+
+    private static IEnumerable<string> GetDevelopmentRepositoryCandidates(string exeDir)
+    {
+        HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string current = exeDir;
+        for (int depth = 0; depth < 6 && !string.IsNullOrEmpty(current); depth++)
+        {
+            if (seen.Add(current)) yield return current;
+            DirectoryInfo parent = Directory.GetParent(current);
+            current = parent == null ? null : parent.FullName;
+        }
+
+        string documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        if (!string.IsNullOrEmpty(documents))
+        {
+            string candidate = Path.Combine(documents, "DeepSeekHarness");
+            if (seen.Add(candidate)) yield return candidate;
+        }
     }
 
     private static bool HasServerEntry(string root)

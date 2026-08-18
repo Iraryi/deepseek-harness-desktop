@@ -58,11 +58,22 @@ internal static class AppPaths
         get { return Path.Combine(DataDir, "WebView2"); }
     }
 
+    public static string DshHome
+    {
+        get
+        {
+            string configured = Environment.GetEnvironmentVariable("DSH_HOME");
+            if (!string.IsNullOrWhiteSpace(configured)) return Path.GetFullPath(configured);
+            return Path.Combine(DataDir, "dsh");
+        }
+    }
+
     public static void Ensure()
     {
         Directory.CreateDirectory(DataDir);
         Directory.CreateDirectory(LogDir);
         Directory.CreateDirectory(WebView2Dir);
+        Directory.CreateDirectory(DshHome);
     }
 }
 
@@ -220,7 +231,7 @@ internal sealed class AppConfig
         {
             cfg.Language = CultureInfo.CurrentUICulture.Name.StartsWith("zh", StringComparison.OrdinalIgnoreCase) ? "zh-CN" : "en-US";
         }
-        if (existingConfig && !firstRunFieldPresent) cfg.FirstRunCompleted = true;
+        if (existingConfig && !firstRunFieldPresent) cfg.FirstRunCompleted = false;
         if (string.IsNullOrEmpty(cfg.LaunchMode)) cfg.LaunchMode = "window";
         if (string.IsNullOrEmpty(cfg.Url)) cfg.Url = "http://127.0.0.1:3080";
         if (cfg.Port <= 0 || cfg.Port > 65535) cfg.Port = 3080;

@@ -131,6 +131,10 @@ type CommunityInstallSurface =
   | { readonly status: 'success'; readonly plugin: HubCommunityPlugin; readonly message: string; readonly logs: readonly HubInstallProgress[] }
   | { readonly status: 'error'; readonly plugin: HubCommunityPlugin; readonly message: string; readonly logs: readonly HubInstallProgress[] }
 
+type ComponentRemovalSurface =
+  | { readonly status: 'idle' }
+  | { readonly status: 'running'; readonly item: HubInstalledItem; readonly progress: HubInstallProgress }
+
 interface HubPreferences {
   readonly discoverySource: DiscoverySource
   readonly detailContent: HubDetailContent
@@ -176,6 +180,7 @@ export function SetupHubDesktopSurface(props: SetupHubDesktopSurfaceProps): Reac
   const [restartAction, setRestartAction] = useState<AsyncState<string>>({ status: 'idle' })
   const [restartPrompt, setRestartPrompt] = useState<string>()
   const [restartTransition, setRestartTransition] = useState(false)
+  const [componentRemoval, setComponentRemoval] = useState<ComponentRemovalSurface>({ status: 'idle' })
 
   useHubTheme(preferences.theme)
 
@@ -337,15 +342,26 @@ export function SetupHubDesktopSurface(props: SetupHubDesktopSurfaceProps): Reac
   }
   const uninstall = (item: HubInstalledItem): void => {
     if (!window.confirm(props.t('uninstallConfirm').replace('{name}', item.name))) return
+    setComponentRemoval({ status: 'running', item, progress: initialComponentRemovalProgress(item, props.t) })
     setAction({ status: 'loading' })
-    void props.requestHub<Record<string, never>>('hub-uninstall', { id: item.id }).then(
+    void props.requestHub<Record<string, never>>('hub-uninstall', { id: item.id }, {
+      onProgress: (progress) => {
+        setComponentRemoval(current => current.status === 'running' && current.item.id === item.id
+          ? { ...current, progress }
+          : current)
+      },
+    }).then(
       () => {
+        setComponentRemoval({ status: 'idle' })
         setAction({ status: 'ready', data: props.t('componentRemoved') })
         markDesktopRestartPending()
         setRestartPrompt(item.name)
         refreshSnapshot()
       },
-      (error) => { setAction({ status: 'error', message: errorMessage(error) }) },
+      (error) => {
+        setComponentRemoval({ status: 'idle' })
+        setAction({ status: 'error', message: errorMessage(error) })
+      },
     )
   }
 
@@ -420,7 +436,7 @@ export function SetupHubDesktopSurface(props: SetupHubDesktopSurfaceProps): Reac
       <header className={css.appHeader}>
         <div className={css.brand}>
           <span className={css.brandMark}><IconCordisPluginOutline14 size={18} /></span>
-          <span><strong>DSH HUB</strong><small>{props.t('brandTagline')}</small></span>
+          <span><strong>{props.t('hubTitle')}</strong><small>{props.t('brandTagline')}</small></span>
         </div>
         {account.authenticated ? (
           <button className={css.accountPill} type="button" onClick={() => { openSection('starred') }}>
@@ -441,6 +457,7 @@ export function SetupHubDesktopSurface(props: SetupHubDesktopSurfaceProps): Reac
       {action.status === 'error' ? <div className={css.toast} role="alert"><IconWarningOutline16 size={16} />{action.message}</div> : null}
       {restartAction.status === 'error' ? <div className={css.toast} role="alert"><IconWarningOutline16 size={16} />{restartAction.message}</div> : null}
       {restartAction.status === 'ready' ? <div className={css.toast} role="status"><IconCheckOutline16 size={16} />{restartAction.data}</div> : null}
+      <ComponentRemovalProgress surface={componentRemoval} t={props.t} />
       {restartPrompt === undefined ? null : <RestartDecisionDialog name={restartPrompt} onLater={() => { setRestartPrompt(undefined) }} onRestart={() => { setRestartPrompt(undefined); void restartDesktop().catch(() => undefined) }} t={props.t} />}
       <RestartTransition active={restartTransition} t={props.t} />
       {communityInstallSurface.status === 'idle' ? null : (
@@ -1459,6 +1476,7 @@ function DesktopComponentManager(props: SetupHubSettingsTabProps): ReactNode {
   const [restartPending, setRestartPending] = useState(readDesktopRestartPending)
   const [restartPrompt, setRestartPrompt] = useState<string>()
   const [restartTransition, setRestartTransition] = useState(false)
+  const [componentRemoval, setComponentRemoval] = useState<ComponentRemovalSurface>({ status: 'idle' })
   useEffect(() => {
     let current = true
     setSnapshot({ status: 'loading' })
@@ -1496,15 +1514,26 @@ function DesktopComponentManager(props: SetupHubSettingsTabProps): ReactNode {
   }
   const uninstall = (item: HubInstalledItem): void => {
     if (!window.confirm(props.t('uninstallConfirm').replace('{name}', item.name))) return
+    setComponentRemoval({ status: 'running', item, progress: initialComponentRemovalProgress(item, props.t) })
     setAction({ status: 'loading' })
-    void props.requestHub<Record<string, never>>('hub-uninstall', { id: item.id }).then(
+    void props.requestHub<Record<string, never>>('hub-uninstall', { id: item.id }, {
+      onProgress: (progress) => {
+        setComponentRemoval(current => current.status === 'running' && current.item.id === item.id
+          ? { ...current, progress }
+          : current)
+      },
+    }).then(
       () => {
+        setComponentRemoval({ status: 'idle' })
         setAction({ status: 'ready', data: props.t('componentRemoved') })
         markRestartPending()
         setRestartPrompt(item.name)
         refresh()
       },
-      (error) => { setAction({ status: 'error', message: errorMessage(error) }) },
+      (error) => {
+        setComponentRemoval({ status: 'idle' })
+        setAction({ status: 'error', message: errorMessage(error) })
+      },
     )
   }
   if (snapshot.status === 'loading' || snapshot.status === 'idle') return <HubLoading t={props.t} />
@@ -1545,8 +1574,39 @@ function DesktopComponentManager(props: SetupHubSettingsTabProps): ReactNode {
       <aside className={css.aiComponentHint}><IconCodeOutline16 size={22} /><div><strong>{props.t('aiComponentTitle')}</strong><span>{props.t('aiComponentBody')}</span><code>{data.libraryPath}</code></div></aside>
       {action.status === 'error' ? <div className={css.inlineError} role="alert">{action.message}</div> : null}
       {action.status === 'ready' ? <div className={css.inlineSuccess} role="status">{action.data}</div> : null}
+      <ComponentRemovalProgress surface={componentRemoval} t={props.t} />
       {restartPrompt === undefined ? null : <RestartDecisionDialog name={restartPrompt} onLater={() => { setRestartPrompt(undefined) }} onRestart={() => { void restartApplication() }} t={props.t} />}
       <RestartTransition active={restartTransition} t={props.t} />
+    </div>
+  )
+}
+
+function initialComponentRemovalProgress(item: HubInstalledItem, t: SetupHubDesktopSurfaceProps['t']): HubInstallProgress {
+  return {
+    detail: item.name,
+    message: t('componentRemovingInitial').replace('{name}', item.name),
+    percent: 3,
+    stage: 'preflight',
+    timestamp: new Date().toISOString(),
+  }
+}
+
+function ComponentRemovalProgress(props: { readonly surface: ComponentRemovalSurface; readonly t: SetupHubDesktopSurfaceProps['t'] }): ReactNode {
+  if (props.surface.status === 'idle') return null
+  const percent = Math.max(0, Math.min(100, props.surface.progress.percent))
+  return (
+    <div className={css.componentProgressBackdrop} role="presentation">
+      <section className={css.componentProgressCard} role="status" aria-live="polite">
+        <span className={css.componentProgressSpinner} aria-hidden="true"><span /></span>
+        <div className={css.componentProgressCopy}>
+          <small>{props.t('componentRemovingStage')}</small>
+          <h2>{props.t('componentRemovingTitle')}</h2>
+          <p>{props.surface.progress.message || props.t('componentRemovingInitial').replace('{name}', props.surface.item.name)}</p>
+          <code>{props.surface.progress.detail || props.surface.item.name}</code>
+        </div>
+        <div className={css.componentProgressBar} aria-label={props.t('componentRemovingTitle')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} role="progressbar"><span style={{ width: `${percent}%` }} /></div>
+        <footer><span>{props.surface.item.name}</span><strong>{percent}%</strong></footer>
+      </section>
     </div>
   )
 }

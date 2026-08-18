@@ -52,7 +52,7 @@ describe('ui-setup-hub browser plugin', () => {
     expect(entry.component).toBe(SetupHubSettingsTab)
     expect(entry.options).toMatchObject({ id: 'hub', order: 5 })
     expect(entry.locale).toBe(NS)
-    expect(resolveSlotLabel(entry.options.label)).toBe('DSH HUB')
+    expect(resolveSlotLabel(entry.options.label)).toBe('HUB')
     expect(b.slots.entries('shell.overlay')).toHaveLength(0)
     expect(fetchMock).not.toHaveBeenCalled()
 
@@ -91,7 +91,7 @@ describe('ui-setup-hub browser plugin', () => {
     const stop = declare(b.slots)
     await vi.waitFor(() => { expect(b.slots.entries('settings.plugins.tab')).toHaveLength(1) })
     b.locale.setLocale('en')
-    expect(resolveSlotLabel(b.slots.entries('settings.plugins.tab')[0]!.options.label)).toBe('DSH HUB')
+    expect(resolveSlotLabel(b.slots.entries('settings.plugins.tab')[0]!.options.label)).toBe('HUB')
 
     stop()
     expect(b.slots.entries('settings.plugins.tab')).toHaveLength(0)

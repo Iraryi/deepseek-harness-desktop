@@ -39,6 +39,7 @@ await pruneDeployRoot(output)
 await restoreMissingDirectPackages(output)
 await materializeLinks(join(output, 'node_modules'))
 await stageNode(output, nodeOption)
+await stagePnpm(output)
 await cp(join(runtimeDir, 'runtime-resolver.mjs'), join(output, 'runtime-resolver.mjs'))
 
 const repositoryManifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
@@ -53,6 +54,8 @@ await writeFile(join(output, 'runtime-manifest.json'), `${JSON.stringify({
     name: 'npm',
     command: 'tools/node/npm.cmd',
     cli: 'tools/node/node_modules/npm/bin/npm-cli.js',
+    pnpmCommand: 'tools/pnpm/pnpm.cmd',
+    pnpmCli: 'tools/pnpm/node_modules/pnpm/bin/pnpm.mjs',
   },
   resolver: 'runtime-resolver.mjs',
   minimumNode: '22.19.0',
@@ -210,4 +213,35 @@ async function stageNode(staging, nodeSource) {
   }
   if (!existsSync(join(destination, 'npm.cmd'))) throw new Error('staged Node runtime has no npm.cmd')
   if (!existsSync(join(stagedNpmDirectory, 'bin', 'npm-cli.js'))) throw new Error('staged Node runtime has no npm CLI')
+}
+
+async function stagePnpm(staging) {
+  const commandCandidates = []
+  if (process.env.APPDATA !== undefined) commandCandidates.push(join(process.env.APPDATA, 'npm', 'pnpm.cmd'))
+  const where = spawnSync('where.exe', ['pnpm.cmd'], { encoding: 'utf8', windowsHide: true })
+  if (where.status === 0) {
+    for (const line of String(where.stdout).split(/\r?\n/)) {
+      if (line.trim().length > 0) commandCandidates.push(line.trim())
+    }
+  }
+
+  let packageDirectory
+  for (const commandPath of commandCandidates) {
+    const candidate = resolve(commandPath)
+    const directory = join(dirname(candidate), 'node_modules', 'pnpm')
+    if (existsSync(join(directory, 'bin', 'pnpm.mjs'))) {
+      packageDirectory = directory
+      break
+    }
+  }
+  if (packageDirectory === undefined) throw new Error('pnpm package was not found; install pnpm before building the Windows Runtime')
+
+  const destination = join(staging, 'tools', 'pnpm')
+  await mkdir(join(destination, 'node_modules'), { recursive: true })
+  await cp(packageDirectory, join(destination, 'node_modules', 'pnpm'), { recursive: true, dereference: true })
+  await writeFile(join(destination, 'pnpm.cmd'), '@echo off\r\nsetlocal\r\n"%~dp0..\\node\\node.exe" "%~dp0node_modules\\pnpm\\bin\\pnpm.mjs" %*\r\n')
+  await writeFile(join(destination, 'pnpm.ps1'), '& "$PSScriptRoot\\..\\node\\node.exe" "$PSScriptRoot\\node_modules\\pnpm\\bin\\pnpm.mjs" @args\r\n')
+  if (!existsSync(join(destination, 'pnpm.cmd')) || !existsSync(join(destination, 'node_modules', 'pnpm', 'bin', 'pnpm.mjs'))) {
+    throw new Error('staged pnpm payload is incomplete')
+  }
 }

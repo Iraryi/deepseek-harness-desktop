@@ -242,7 +242,8 @@ export class ClientModuleRegistry extends Service {
       'client-modules: bundle route',
     )
     ctx.effect(
-      () => ctx.webServer.tapIndex((html) => {
+      () => ctx.webServer.tapIndex(async (html) => {
+        await ctx.loader.await()
         this.reconcileAll((err) => { ctx.logger.warn(err) })
         return injectBootManifest(html, this.composed)
       }),

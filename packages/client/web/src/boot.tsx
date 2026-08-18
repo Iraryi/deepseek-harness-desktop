@@ -60,6 +60,8 @@ export type BootSeams = Pick<ClientModuleSystemOptions, 'loadBundle'>
  * twice.
  */
 const MODULES_ID = '@deepseek-ai/dsh-client-modules'
+const DESKTOP_BOOT_HEARTBEAT_MILLISECONDS = 5_000
+const DESKTOP_BOOT_ACTIVATION_TIMEOUT_MILLISECONDS = 60_000
 
 const DESKTOP_BOOT_ID = /^[0-9a-f]{32}$/
 
@@ -253,6 +255,8 @@ export class AppWebEntry {
   private modules!: ClientModuleSystem
   private manifest!: BootManifest
   private root: Root | undefined
+  private desktopBootHeartbeat: ReturnType<typeof setInterval> | undefined
+  private desktopBootStage = 'Preparing Web UI'
 
   /**
    * Hold the mount point; all work happens in {@link run}.
@@ -264,6 +268,27 @@ export class AppWebEntry {
     this.seams = seams
   }
 
+  private setDesktopBootStage(stage: string): void {
+    this.desktopBootStage = stage
+    publishDesktopBootStatus({
+      state: 'loading', retryable: false, failures: [], message: stage,
+    })
+  }
+
+  private startDesktopBootHeartbeat(): void {
+    if (this.desktopBootHeartbeat !== undefined) return
+    this.setDesktopBootStage(this.desktopBootStage)
+    this.desktopBootHeartbeat = globalThis.setInterval(() => {
+      this.setDesktopBootStage(this.desktopBootStage)
+    }, DESKTOP_BOOT_HEARTBEAT_MILLISECONDS)
+  }
+
+  private stopDesktopBootHeartbeat(): void {
+    if (this.desktopBootHeartbeat === undefined) return
+    globalThis.clearInterval(this.desktopBootHeartbeat)
+    this.desktopBootHeartbeat = undefined
+  }
+
   /**
    * Run the boot chain to settlement. Boot-chain failures resolve (not
    * reject): the loading page stays up and renders the failure report (the
@@ -272,11 +297,13 @@ export class AppWebEntry {
    * @returns resolves once the UI settled or the failure report rendered.
    */
   async run(): Promise<void> {
-    publishDesktopBootStatus({ state: 'loading', retryable: false, failures: [] })
+    this.startDesktopBootHeartbeat()
     try {
       this.manifest = parseBootManifest((globalThis as DshWindow).__DSH_BOOT__)
+      this.setDesktopBootStage('Web UI manifest ready')
     } catch (reason) {
       this.publishBootFailure(reason)
+      this.stopDesktopBootHeartbeat()
       throw reason
     }
 
@@ -317,20 +344,24 @@ export class AppWebEntry {
     const prefetching = this.prefetchImmediateTier()
     this.ctx = new Context()
     try {
+      this.setDesktopBootStage('Activating Web UI plugins')
       await this.runPluginBoot(prefetching)
       this.settled.set(true)
       publishDesktopBootStatus({ state: 'ready', retryable: false, failures: [] })
+      this.stopDesktopBootHeartbeat()
     } catch (reason) {
       // Stay on the loading page; surface the sweep report (fail loud).
       console.error(reason)
       const message = reason instanceof Error ? reason.message : String(reason)
       this.error.set(message)
       this.publishBootFailure(reason)
+      this.stopDesktopBootHeartbeat()
     }
   }
 
   /** Unmount the shell (loading page or settled UI). */
   dispose(): void {
+    this.stopDesktopBootHeartbeat()
     this.root?.unmount()
   }
 
@@ -367,7 +398,9 @@ export class AppWebEntry {
     // and materialization runs synchronous cross-package require edges that
     // need every immediately-tier factory already registered (module
     // comment). Resolves even when individual prefetches failed.
+    this.setDesktopBootStage('Prefetching browser bundles')
     await prefetching
+    this.setDesktopBootStage('Creating Web UI plugins')
 
     // Adoption handoff, plugin side: the modules entry is created first —
     // its wrapper apply reads the kernel slot and provides ctx.modules (the
@@ -391,7 +424,9 @@ export class AppWebEntry {
     }))
 
     await loader.await()
-    await awaitClientEntriesActive(ctx)
+    this.setDesktopBootStage('Waiting for plugin services')
+    await awaitClientEntriesActive(ctx, DESKTOP_BOOT_ACTIVATION_TIMEOUT_MILLISECONDS)
+    this.setDesktopBootStage('Checking plugin activation')
     this.assertEntriesActive()
   }
 

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   SetupHubDesktopSurface, SetupHubSettingsTab, type SetupHubSettingsTabProps,
 } from '../src/client/SetupHubSettingsTab.tsx'
+import type { HubInstallProgress } from '../src/client/bridge.ts'
 import { zh } from '../src/client/locales.ts'
 
 const manifest = {
@@ -92,19 +93,30 @@ describe('SetupHubSettingsTab', () => {
 
   it('offers restart choices after uninstalling a Desktop component', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const requestHub = hubRequest({
-      'hub-snapshot': {
-        ...emptySnapshot,
-        installed: [{ id: 'installed-test', installedAt: '2026-08-17T00:00:00Z', kind: 'virtual', name: 'Installed Test', packageNames: ['installed-test'], profile: 'web', removable: true, workspacePath: 'C:\\hub\\installed-test' }],
-      },
-      'hub-uninstall': {},
-      'app-reload': { requested: true },
-    })
+    const snapshot = {
+      ...emptySnapshot,
+      installed: [{ id: 'installed-test', installedAt: '2026-08-17T00:00:00Z', kind: 'virtual', name: 'Installed Test', packageNames: ['installed-test'], profile: 'web', removable: true, workspacePath: 'C:\\hub\\installed-test' }],
+    }
+    let completeUninstall: ((value: Record<string, never>) => void) | undefined
+    const requestHub = vi.fn((operation: string, _payload?: Readonly<Record<string, unknown>>, options?: { readonly onProgress?: (progress: HubInstallProgress) => void }) => {
+      if (operation === 'hub-snapshot') return Promise.resolve(snapshot)
+      if (operation === 'hub-uninstall') {
+        queueMicrotask(() => {
+          options?.onProgress?.({ detail: 'C:\\Users\\test\\.dsh\\profiles\\web', message: '依赖已移除，正在更新 Web Profile。', percent: 72, stage: 'profile', timestamp: '2026-08-18T00:00:00.000Z' })
+        })
+        return new Promise<Record<string, never>>((resolve) => { completeUninstall = resolve })
+      }
+      if (operation === 'app-reload') return Promise.resolve({ requested: true })
+      return Promise.resolve(emptySnapshot)
+    }) as unknown as SetupHubSettingsTabProps['requestHub']
     render(<SetupHubSettingsTab {...runtimeProps} desktopAvailable list={async () => ({ schemaVersion: 1, generatedAt: '2026-08-17T00:00:00.000Z', source: 'https://example.com', entries: [] })} install={async () => 'ok'} requestHub={requestHub} openConfig={() => {}} openHub={() => {}} leaveHub={() => {}} t={t} />)
 
     await screen.findByText('Installed Test')
     fireEvent.click(screen.getByRole('button', { name: zh.uninstall }))
-    await waitFor(() => { expect(requestHub).toHaveBeenCalledWith('hub-uninstall', { id: 'installed-test' }) })
+    await waitFor(() => { expect(requestHub).toHaveBeenCalledWith('hub-uninstall', { id: 'installed-test' }, expect.objectContaining({ onProgress: expect.any(Function) })) })
+    expect(await screen.findByRole('heading', { name: zh.componentRemovingTitle })).toBeTruthy()
+    await waitFor(() => { expect(screen.getByRole('progressbar', { name: zh.componentRemovingTitle }).getAttribute('aria-valuenow')).toBe('72') })
+    await act(async () => { completeUninstall?.({}); await Promise.resolve() })
     expect(await screen.findByRole('dialog', { name: zh.componentRestartTitle })).toBeTruthy()
     expect(screen.getByRole('button', { name: zh.restartNow })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: zh.restartLater }))

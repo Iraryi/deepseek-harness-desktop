@@ -1,5 +1,5 @@
 param(
-    [string]$Setup = "$PSScriptRoot\dist\DeepSeek-Harness-Setup-Full-0.1.0-rc.5-win-x64.exe",
+    [string]$Setup = "$PSScriptRoot\dist\DeepSeek-Harness-Setup-Full-0.1.0-rc.6-win-x64.exe",
     [int]$ResponseTimeoutMilliseconds = 500,
     [int]$OverallTimeoutMinutes = 35,
     [switch]$StopAtCheck

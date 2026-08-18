@@ -25,7 +25,10 @@ $requiredLauncherFiles = @(
     'dsh-config.exe',
     'Microsoft.Web.WebView2.Core.dll',
     'Microsoft.Web.WebView2.WinForms.dll',
-    'WebView2Loader.dll'
+    'WebView2Loader.dll',
+    'community-registry.json',
+    'dshmk-catalog.json',
+    'THIRD-PARTY-NOTICES.txt'
 )
 foreach ($name in $requiredLauncherFiles) {
     if (-not (Test-Path (Join-Path $launcher $name))) { throw "Launcher file missing: $name" }

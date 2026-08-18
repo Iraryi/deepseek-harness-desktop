@@ -25,7 +25,9 @@ internal static class ConfigProgram
             if (string.Equals(arg, "--first-run", StringComparison.OrdinalIgnoreCase)) firstRun = true;
             if (string.Equals(arg, "--hub", StringComparison.OrdinalIgnoreCase)) hubMode = true;
         }
-        Application.Run(new ConfigForm(firstRun, hubMode));
+        ConfigForm form = new ConfigForm(firstRun, hubMode);
+        Application.Run(form);
+        if (form.LaunchAfterClose) form.LaunchApplicationAfterClose();
     }
 }
 
@@ -577,6 +579,8 @@ internal sealed class ConfigForm : Form
 
     private Label _lblDataDir;
 
+    internal bool LaunchAfterClose { get; private set; }
+
     public ConfigForm()
         : this(false, false)
     {
@@ -630,7 +634,7 @@ internal sealed class ConfigForm : Form
     {
         SuspendLayout();
 
-        Text = _hubConfigMode ? "DSH HUB - Config" : "DeepSeek Harness - Config";
+        Text = "CONFIG";
         if (showImmediately)
         {
             AutoScaleMode = AutoScaleMode.Dpi;
@@ -869,8 +873,7 @@ internal sealed class ConfigForm : Form
         if (_cfg.Language != "zh-CN") return english;
         switch (english)
         {
-            case "DeepSeek Harness - Config": return "DeepSeek Harness - 配置";
-            case "DSH HUB - Config": return "DSH HUB - 配置";
+            case "CONFIG": return "CONFIG";
             case "CONFIGURATION": return "配置中心";
             case "HUB CONFIGURATION": return "HUB 配置";
             case "Desktop settings": return "主程序设置";
@@ -914,10 +917,10 @@ internal sealed class ConfigForm : Form
             case "Harness folder": return "Harness 目录";
             case "Leave either path blank to use automatic detection.": return "路径留空时使用自动检测。";
             case "Browser extensions and Web UI customization files.": return "浏览器扩展与 Web UI 二次开发文件。";
-            case "Theme and visual behavior stored only for DSH HUB.": return "仅应用于 DSH HUB 的主题与视觉设置。";
+            case "Theme and visual behavior stored only for HUB.": return "仅应用于 HUB 的主题与视觉设置。";
             case "Startup choices stored separately from the main Desktop program.": return "与主程序互不影响的 HUB 启动设置。";
             case "HUB loading and close behavior are stored separately from the main Desktop program.": return "HUB 的加载画面与关闭行为独立于主程序保存。";
-            case "Allow Desktop plugins to affect DSH HUB": return "允许主程序插件影响 DSH HUB";
+            case "Allow Desktop plugins to affect HUB": return "允许主程序插件影响 HUB";
             case "Disabled by default: HUB uses an isolated Web Profile so Desktop sidebar and UI plugins do not leak into it.": return "默认关闭：HUB 使用独立 Web Profile，主程序的侧边栏和界面插件不会混入 HUB。";
             case "Appearance": return "外观";
             case "Color theme": return "颜色主题";
@@ -1013,17 +1016,17 @@ internal sealed class ConfigForm : Form
         _targetSelectorHost.Resize += delegate { PositionConfigTargetControls(); };
 
         _targetSelectorHeader = MakeTargetChoice(
-            _hubConfigMode ? "DSH HUB" : "DeepSeek Harness",
+            _hubConfigMode ? "HUB" : "DSH",
             T(_hubConfigMode ? "HUB CONFIGURATION" : "CONFIGURATION"), false, true);
         _targetSelectorHeader.Click += delegate { SetConfigTargetMenuExpanded(!_targetMenuExpanded); };
         _targetSelectorHost.Controls.Add(_targetSelectorHeader);
 
-        _targetDesktopOption = MakeTargetChoice("DeepSeek Harness", T("Desktop settings"), !_hubConfigMode, false);
+        _targetDesktopOption = MakeTargetChoice("DSH", T("Desktop settings"), !_hubConfigMode, false);
         _targetDesktopOption.Click += delegate { SwitchConfigTarget(false); };
         _targetDesktopOption.Visible = false;
         _targetSelectorHost.Controls.Add(_targetDesktopOption);
 
-        _targetHubOption = MakeTargetChoice("DSH HUB", T("HUB settings"), _hubConfigMode, false);
+        _targetHubOption = MakeTargetChoice("HUB", T("HUB settings"), _hubConfigMode, false);
         _targetHubOption.Click += delegate { SwitchConfigTarget(true); };
         _targetHubOption.Visible = false;
         _targetSelectorHost.Controls.Add(_targetHubOption);
@@ -1502,7 +1505,7 @@ internal sealed class ConfigForm : Form
     private Panel BuildHubAppearancePage()
     {
         TableLayoutPanel content;
-        Panel page = CreatePage("HUB Appearance", "Theme and visual behavior stored only for DSH HUB.", out content);
+        Panel page = CreatePage("HUB Appearance", "Theme and visual behavior stored only for HUB.", out content);
 
         AddSectionTitle(content, "Appearance");
         AddFieldLabel(content, "Color theme");
@@ -1545,7 +1548,7 @@ internal sealed class ConfigForm : Form
         hint.Margin = new Padding(0, 4, 0, 0);
         AddRow(content, hint);
 
-        _chkHubAllowDesktopPlugins = MakeCheckBox("Allow Desktop plugins to affect DSH HUB");
+        _chkHubAllowDesktopPlugins = MakeCheckBox("Allow Desktop plugins to affect HUB");
         AddRow(content, _chkHubAllowDesktopPlugins);
         Label isolationHint = MakeMutedBlock(48);
         isolationHint.Text = "Disabled by default: HUB uses an isolated Web Profile so Desktop sidebar and UI plugins do not leak into it.";
@@ -2148,23 +2151,32 @@ internal sealed class ConfigForm : Form
             _cfg.FirstRunCompleted = true;
             _cfg.Save();
             _hubCfg.Save();
-            if (launch)
-            {
-                string main = Path.Combine(AppPaths.ExeDir, _hubConfigMode ? "dsh-hub.exe" : "dsh.exe");
-                if (File.Exists(main))
-                {
-                    ProcessStartInfo psi = new ProcessStartInfo(main);
-                    psi.WorkingDirectory = AppPaths.ExeDir;
-                    Process.Start(psi);
-                }
-            }
+            LaunchAfterClose = launch;
             Close();
         }
         catch (Exception ex)
         {
             MessageBox.Show(this, (_cfg.Language == "zh-CN" ? "保存失败：" : "Save failed: ") + ex.Message,
-                _cfg.Language == "zh-CN" ? "DeepSeek Harness 配置" : "DeepSeek Harness Config",
+                "CONFIG",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    internal void LaunchApplicationAfterClose()
+    {
+        try
+        {
+            string main = Path.Combine(AppPaths.ExeDir, _hubConfigMode ? "dsh-hub.exe" : "dsh.exe");
+            if (!File.Exists(main)) return;
+            ProcessStartInfo startInfo = new ProcessStartInfo("explorer.exe");
+            startInfo.Arguments = "\"" + main.Replace("\"", "\\\"") + "\"";
+            startInfo.UseShellExecute = true;
+            Process.Start(startInfo);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show((_cfg.Language == "zh-CN" ? "启动失败：" : "Launch failed: ") + ex.Message,
+                "CONFIG", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 }

@@ -5,7 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { Context } from '@deepseek-ai/cordis'
+import { Context, type Fiber } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { WebServer, WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { ClientModuleRegistry } from '../src/index.ts'
@@ -41,7 +41,7 @@ function writePackage(
 function constructWithRoute(packageNames: string[]): {
   service: ClientModuleRegistry
   route: WebRoute
-  transformIndex: (html: string) => string
+  transformIndex: (html: string) => string | Promise<string>
 } {
   const ctx = new Context()
   ctx.baseUrl = pathToFileURL(root!).href + '/'
@@ -51,9 +51,10 @@ function constructWithRoute(packageNames: string[]): {
         yield { options: { name: packageName }, fiber: {}, disabled: false }
       }
     },
+    async await() {},
   })
   let route: WebRoute | undefined
-  let transformIndex: ((html: string) => string) | undefined
+  let transformIndex: ((html: string) => string | Promise<string>) | undefined
   const webServer: Pick<WebServer, 'port' | 'register' | 'tapIndex'> = {
     port: 0,
     register: (candidate) => {
@@ -78,6 +79,41 @@ function construct(packageNames: string[]): ClientModuleRegistry {
 }
 
 describe('client bundle activation', () => {
+  it('discovers a client entry created by a later sibling plugin', async () => {
+    const packageName = '@fixture/late-sibling'
+    const clientPath = writePackage(packageName)
+    mkdirSync(dirname(clientPath), { recursive: true })
+    writeFileSync(clientPath, 'module.exports = {}\n')
+
+    const entries: Array<{ options: { name: string }; fiber: {}; disabled: boolean }> = []
+    const ctx = new Context()
+    ctx.baseUrl = pathToFileURL(root!).href + '/'
+    ctx.provide('loader', {
+      *entries() {
+        yield* entries
+      },
+    })
+    const webServer: Pick<WebServer, 'port' | 'register' | 'tapIndex'> = {
+      port: 0,
+      register: () => () => {},
+      tapIndex: () => () => {},
+    }
+    ctx.provide('webServer', webServer as WebServer)
+    await ctx.plugin(ClientModuleRegistry)
+    const service = ctx.get('clientModules')
+    expect(service?.graph().entries).toEqual([])
+
+    await ctx.plugin((siblingCtx) => {
+      const entry = { options: { name: packageName }, fiber: {}, disabled: false }
+      entries.push(entry)
+      siblingCtx.emit('internal/plugin', { entry } as Fiber)
+    })
+    await Promise.resolve()
+
+    expect(service?.graph().entries.map(entry => entry.id)).toEqual([packageName])
+    await ctx.fiber.dispose()
+  })
+
   it('allows sibling dsh roles', () => {
     const currentName = '@fixture/current-client-field'
     const clientPath = writePackage(currentName, {
@@ -92,7 +128,7 @@ describe('client bundle activation', () => {
     expect(construct([currentName]).graph().entries.map(entry => entry.id)).toEqual([currentName])
   })
 
-  it('retries a package resolution miss before serving the boot manifest', () => {
+  it('retries a package resolution miss before serving the boot manifest', async () => {
     const packageName = '@fixture/healed-fallback'
     root = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-client-modules-')))
     const { service, transformIndex } = constructWithRoute([packageName])
@@ -102,7 +138,55 @@ describe('client bundle activation', () => {
     mkdirSync(dirname(clientPath), { recursive: true })
     writeFileSync(clientPath, 'module.exports = {}\n')
 
-    const html = transformIndex('<html><head></head></html>')
+    const html = await transformIndex('<html><head></head></html>')
+    expect(service.graph().entries.map(entry => entry.id)).toEqual([packageName])
+    expect(html).toContain(packageName)
+  })
+
+  it('waits for Loader settlement before serving the first boot manifest', async () => {
+    const packageName = '@fixture/settled-first-index'
+    const clientPath = writePackage(packageName)
+    mkdirSync(dirname(clientPath), { recursive: true })
+    writeFileSync(clientPath, 'module.exports = {}\n')
+
+    const entries: Array<{ options: { name: string }; fiber: {}; disabled: boolean }> = []
+    let settleLoader!: () => void
+    const loaderSettlement = new Promise<void>((resolve) => { settleLoader = resolve })
+    const ctx = new Context()
+    ctx.baseUrl = pathToFileURL(root!).href + '/'
+    ctx.provide('loader', {
+      *entries() {
+        yield* entries
+      },
+      await() {
+        return loaderSettlement
+      },
+    })
+    let transformIndex: ((html: string) => string | Promise<string>) | undefined
+    const webServer: Pick<WebServer, 'port' | 'register' | 'tapIndex'> = {
+      port: 0,
+      register: () => () => {},
+      tapIndex: (transform) => {
+        transformIndex = transform
+        return () => {}
+      },
+    }
+    ctx.provide('webServer', webServer as WebServer)
+    const service = new ClientModuleRegistry(ctx)
+    if (transformIndex === undefined) throw new Error('client boot-manifest transform was not registered')
+
+    let rendered = false
+    const firstIndex = Promise.resolve(transformIndex('<html><head></head></html>')).then((html) => {
+      rendered = true
+      return html
+    })
+    await Promise.resolve()
+    expect(rendered).toBe(false)
+
+    entries.push({ options: { name: packageName }, fiber: {}, disabled: false })
+    settleLoader()
+    const html = await firstIndex
+
     expect(service.graph().entries.map(entry => entry.id)).toEqual([packageName])
     expect(html).toContain(packageName)
   })

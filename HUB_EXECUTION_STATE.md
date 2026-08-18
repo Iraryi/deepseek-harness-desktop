@@ -15,7 +15,19 @@ This file is the mandatory operational ledger for work governed by [HUB_REQUIREM
 
 Status date: 2026-08-17
 
-This checkpoint is complete. The current implementation has a functional native HUB entry, DSHMK-backed discovery, Setup-style install progress, Desktop service reload, bounded Web UI startup recovery, and light/dark responsive HUB layouts. The packaged Runtime, isolated installation directory, Full Setup, Lite Setup, and portable distribution pass their release smoke sequences. Documentation validation, diff inspection, and owned-process cleanup are complete; one inert retained-profile test copy under `artifacts/` and five failed DSHMK smoke directories under the system temporary directory remain because the host command policy rejected their verified recursive deletion.
+This checkpoint is active. A clean virtual-machine installation exposed release-blocking regressions that prior development-profile and large-window checks did not cover. Work continues until the clean-install VM regression gate in `HUB_REQUIREMENTS.md` passes and a new local Full/Lite Setup pair is built. GitHub upload is not authorized during this checkpoint.
+
+## Active clean-install VM regression checkpoint
+
+- Reproduce and eliminate startup tearing and stale fixed-size surfaces at `1024x768` in normal, bordered maximized, and borderless modes. Exclusive fullscreen is a control case, not the only accepted mode. The development machine also reproduces bordered-mode tearing.
+- Repair uninstall-then-reinstall onboarding so a newly installed application opens CONFIG before Desktop even when user data or a prior completion flag survives uninstall. Prevent the contradictory Desktop startup that stalls at boot stage 5 and ends with `Start failed: Access denied`.
+- Verify that Full Setup contains the current bundled DSHMK snapshot, Setup manifests, launcher source adapters, Web client, and internal package-management implementation. A clean machine must not require the maintainer's existing profile, cache, `plugin-store`, or system package managers to obtain correct catalog details and Setup eligibility.
+- Repair constrained-window action controls so `Local build required` and `One-click Setup` remain fully visible and clickable in catalog cards and reconstructed details at `1024x768`.
+- Add owned per-user command registration for `dsh`, `dsh-hub`, and `dsh-config`; bundle every package-management tool used by installed Setup flows, including pnpm when invoked; verify clean uninstall of only the owned command path.
+- Replace CONFIG's reused Desktop icon with the gear variant across EXE resources, shortcuts, taskbar, window, and tray surfaces.
+- Normalize and localize native and WebView context-menu terminology to `DSH`, `HUB`, and `CONFIG`, with language-selected verbs in Desktop, HUB, and CONFIG processes.
+- Preserve the existing uncommitted resilient WebView2 vendor-download change in `windows/release/build.ps1`. Do not reset or clean the working tree, generated evidence, or prior release outputs while implementing this checkpoint.
+- Required final evidence: focused tests, production Web and Launcher builds, clean isolated Runtime, empty-data first launch, uninstall/reinstall first launch, DSHMK online and bundled-cache paths, low-resolution screenshots for four window modes, command/PATH checks, icon and localization checks, installed-directory smokes, and one final local release build. Do not upload assets or commits until explicitly authorized.
 
 ## Setup release checkpoint
 
@@ -142,6 +154,26 @@ This checkpoint is complete. The current implementation has a functional native 
 - The development files were synchronized to `C:\Users\65428\AppData\Local\Programs\DeepSeek Harness` after a rollback backup at `C:\Users\65428\AppData\Local\Programs\DeepSeek Harness\dev-backups\restart-taskbar-20260817-132013`. Fresh installed Desktop and HUB WebView smokes each verified first-run CONFIG, packaged-runtime readiness, and zero remaining installed-directory processes.
 - No standalone Setup EXE was rebuilt for this ordinary UI and lifecycle iteration.
 
+## Plugin startup asset recovery and uninstall progress checkpoint
+
+- The first-start failure after component removal was traced to WebView2 retaining the removed plugin's client bundle reference and cache state, not to the final DSH Web Profile. The installed log recorded `failed to import loader entry cb193bf4 (@dsh-external/dsh-ads)` after the package and profile entry had already been removed.
+- `MainApp` now recognizes the stale client-bundle failure signature, navigates to `about:blank`, clears `DiskCache`, `CacheStorage`, and `ServiceWorkers`, then restarts the owned Node service once with a fresh boot token. This path is separate from pending-only plugin service recovery and cannot enter an unbounded retry loop.
+- HUB and Desktop component removal now expose native progress from the confirmation point through receipt cleanup, Profile update, launch-reference cleanup, and verification. The Web UI presents a dedicated rounded progress surface instead of leaving a silent gap before the restart decision.
+- Launcher and HUB foreground activation now use the current UI thread, temporary TopMost promotion, thread-input attachment, and explicit taskbar-frame restoration. This keeps HUB in front when opened from Desktop while preserving independent HUB and Desktop taskbar windows.
+- Focused validation on 2026-08-18 passed: Setup HUB component and bridge tests (`23/23`), Setup HUB typecheck, Launcher build at `windows/launcher/dist-latest-issues-check`, normal Web UI gate, pending-only service recovery gate, stale client-asset recovery gate, independent Desktop/HUB taskbar smoke, and Setup bridge smoke. The stale-asset gate observed zero controlled navigation retries, one cache-clearing recovery, two service starts, and final structured ready status.
+- The HUB-to-Desktop packaged-runtime restart smoke was not rerun in this checkpoint because the selected Launcher development directory does not contain `runtime/runtime-manifest.json`; this is an artifact-selection limitation, not a test failure. No Setup EXE was rebuilt or published.
+
+## Setup rebuild checkpoint — 2026-08-18
+
+- The product owner explicitly requested a new Setup EXE build. The current Launcher, Web client, private Runtime, Full Setup, and Lite Setup inputs were rebuilt on D with no GitHub upload.
+- The first release-chain attempt compiled both Setup EXEs successfully but exposed a smoke-harness-only failure: Inno Setup resolves `{localappdata}` through the Windows Shell Folders registry, while the harness only changed the `LOCALAPPDATA` environment variable. The current machine's `C:\Users\65428\AppData\Local\DeepSeekHarness` is a D-drive Junction, which Inno's reparse-point guard correctly rejected.
+- `windows/setup/smoke.ps1` now temporarily redirects both HKCU Shell Folders entries to isolated real D-drive directories, restores the original values in `finally`, and keeps the product's standard data-mode behavior unchanged. Full upgrade, uninstall with a locked bundled Node process, reinstall-first-run CONFIG routing, and Lite portable install then passed.
+- Final release output: `windows/release/dist-setup-rebuild-20260818`.
+- Full Setup: `343,311,275` bytes, SHA-256 `2e47add6cb13cbb6c0a39f59ec524e64e1a6a342c243ebd4fde97b2de5ac456a`.
+- Lite Setup: `4,886,756` bytes, SHA-256 `dcb13bf5f82ee1d38923775b0c5dbb5fe7379c7b3de4960de78ddb32c8e0ad4a`.
+- Runtime archive: `127,464,594` bytes, SHA-256 `d367bf8573db4ab729d6c6b4ad0467079462ce9acb9bc7636d314f9a3b30f28b`; Portable archive: `129,687,798` bytes, SHA-256 `1100931cae93a793731aa137be3d0e567097452434323c5b3d91231dbba5ba72`.
+- `release-manifest.json` matches all six release assets by byte count and SHA-256. Shell Folders were restored to `C:\Users\65428\AppData\Local`, no owned DSH/Node processes remain, and no GitHub upload was performed.
+
 ## Durable evidence
 
 - Launcher development output: `windows/launcher/dist-dshmk-dev`
@@ -196,4 +228,50 @@ This checkpoint is complete. The current implementation has a functional native 
 
 ## Completion condition for this checkpoint
 
-Result: complete. The Runtime build, Runtime smoke, isolated installed-directory WebView smoke, DSHMK offline smoke, DSHMK packaged installation and retry smoke, Desktop reload smoke, bounded retained-profile startup recovery, Full and Lite Setup compilation, installation and uninstall smoke, portable smoke, relevant documentation, diff inspection, manifest verification, and owned-process cleanup all pass. The existing Setup assets predate the startup-recovery and DSHMK package-manager fixes. The prior build authorization applied only to the explicit Setup request; ordinary UI iteration has returned to the no-Setup-build rule.
+Result: complete. The Runtime build, Runtime smoke, isolated installed-directory WebView smoke, DSHMK offline smoke, DSHMK packaged installation and retry smoke, Desktop reload smoke, bounded retained-profile startup recovery, Full and Lite Setup compilation, installation and uninstall smoke, portable smoke, relevant documentation, diff inspection, manifest verification, and owned-process cleanup all pass. The final local release output is `windows/release/dist-vm-regression-final` and includes the current startup-recovery, DSHMK package-manager, onboarding, window-geometry, environment-variable, runtime-pnpm, icon, and localization fixes. GitHub upload remains intentionally disabled for this checkpoint.
+
+## Final local VM-regression release checkpoint
+
+- The release pipeline completed with exit code `0` after geometry, Desktop/HUB service-gate, Node recovery, DSHMK installation, Full/Lite Setup compilation, Setup install/uninstall, and portable HTTP smoke checks.
+- Full Setup: `windows/release/dist-vm-regression-final/DeepSeek-Harness-Setup-Full-0.1.0-rc.5-win-x64.exe`, `343,310,365` bytes, SHA-256 `7fddb7deabe331cf2a0325b2e04aa4916d3a470e088897e70aa9ba24baf7f170`.
+- Lite Setup: `windows/release/dist-vm-regression-final/DeepSeek-Harness-Setup-Lite-0.1.0-rc.5-win-x64.exe`, `4,884,889` bytes, SHA-256 `f1b1f404a98049cefc9750ffef92f7b97d70535df2bca4cc5e2d576113e4a4b5`.
+- Portable ZIP: `129,683,942` bytes, SHA-256 `e44af194f889c48a2292fc7d2fca2a62c517403742e93f1b019d0f73b4c718eb`; Runtime ZIP: `127,465,536` bytes, SHA-256 `347ca7b3966b57d90f1ab21d8de67da7c41344fa85d1816183cb4864c84f8a7f`.
+- `release-manifest.json` and `SHA256SUMS.txt` match every generated asset. The release smoke reached HTTP 200 using the packaged private Node runtime and removed its temporary portable process tree.
+- No `dsh.exe`, `dsh-hub.exe`, `dsh-config.exe`, or Node process remains from the final smoke. The only locally produced deliverables are retained; no GitHub upload or commit was performed.
+
+## CONFIG save-and-run cold-start checkpoint — 2026-08-18
+
+- The reproduced path is now recorded as the authoritative regression path: fresh Setup installation, automatic CONFIG routing, `保存并运行`, first WebView/plugin cold start, and final startup outcome. The failure is not treated as retained configuration by default.
+- The first-run handoff now uses one owned `DSH_HOME` resolution for CONFIG, Desktop, HUB, and the bundled Node process. When no explicit environment value exists, the profile is created under the application data directory instead of silently falling back to the user's unrelated `.dsh` directory.
+- Web UI startup now emits a navigation-scoped progress heartbeat every five seconds and reports concrete stages. Launcher verification uses both an idle-progress timeout and a hard upper bound, so a slow but advancing first boot is not restarted at 45 seconds. First navigation allows 120 seconds; a controlled retry uses a 60-second hard limit.
+- The client activation wait is bounded at 60 seconds and the native launcher retains one bounded service recovery for a terminal pending-only failure. Recovery counts and navigation tokens remain scoped so stale status messages cannot settle a later navigation.
+- Added a slow-progress regression to `windows/launcher/smoke-service-gate.ps1`. A synthetic first navigation sends active heartbeats for 50 seconds, then becomes ready; the rebuilt Launcher kept one service process, one navigation, and zero retry/recovery actions.
+- Focused Web tests passed: `28/28` across the changed boot settlement, AppRoot, Setup HUB, and component surfaces. The Web frontend build, Launcher build, normal ready gate, pending-service recovery gate, stale-client-asset recovery gate, and 50-second slow-progress gate passed.
+- A real Full Setup install smoke passed the exact CONFIG save-and-run path with one bundled Node launch, HTTP 200, settled plugin graph, completed WebView navigation, and no automatic recovery. Full/Lite Setup compilation completed in `windows/setup/dist-first-run-fix-20260818`.
+- Current local deliverables: Full Setup `343,311,901` bytes, SHA-256 `337348e03fb64b0b06570b00691f7c7f49ae26cbb756cac4aec8ff1d1c620592`; Lite Setup `4,886,800` bytes, SHA-256 `5fac5074e7984a2b77dbd95ec21ba917fa8ae7f4afcbca3e51c9f4db51ed7b2d`; Runtime ZIP `127,465,193` bytes, SHA-256 `f93332d47af28792cc83aa5c43241744593ae534d1e675c6d461da9157e4f847`.
+- The first smoke attempts exposed test-harness cleanup defects: one run tracked installed `dsh.exe` as a CIM process object and did not terminate the descendant WebView2 tree; another run placed Windows AAD Broker state files inside a per-run Shell Folder sandbox. Smoke cleanup now accepts process IDs, terminates the full tree, matches the isolated data directory, and uses a reusable real Shell Folder sandbox while deleting only DSH-owned data. The final smoke rerun passed. The two inert intermediate directories `windows/setup/dist/smoke-install-0c3ea505` and `windows/setup/dist/smoke-install-b51d78e9` remain without referencing processes because host deletion policy rejected recursive cleanup.
+- No GitHub upload or commit was performed. The new Setup EXEs remain local testing artifacts until a release checkpoint is explicitly authorized.
+
+## First CONFIG-to-Desktop startup and restart checkpoint — 2026-08-18
+
+- The VMware first-run failure is an early index-response race, not a CONFIG handoff Job failure. The HTTP port can open while the Loader is still settling; the first `index.html` response could therefore inject an empty or incomplete `window.__DSH_BOOT__` graph. The WebView then remained pending for `slots`, `sessions`, and `layout` even though the service was reachable.
+- `packages/host/webserver` now accepts asynchronous index transforms and applies them in order. `packages/client/modules` awaits Loader settlement before reconciling and injecting the boot manifest, so the first request receives the settled graph rather than relying on a refresh or recovery navigation.
+- The same VM log exposed a separate restart defect: the old server Job was reused after shutdown, the replacement Node could not be assigned, and the old service still occupied port 3080. `MainApp.StopServer()` now terminates, disposes, and clears the old Job, waits for the port to close, and lets the next start create a fresh containment Job. Inherited external Job access denial remains a non-fatal containment fallback, not the first-run root cause.
+- Direct VM evidence: the failing run started at 18:49:34, first reached `http://127.0.0.1:3080` at 18:50:06, stalled through two pending boot attempts, and moved to 55266 during recovery because 3080 remained occupied. After the final relaunch at 19:13:03, one Node process reached structured ready status at 19:13:09.
+- Validation passed with the rebuilt artifacts: Runtime offline smoke, first-index smoke (first response 39 entries and second response 39 entries), packaged Desktop reload (HTTP 200 before and after reload on the same configured port), and forced Launcher termination cleanup.
+- Full/Lite Setup smoke passed twice consecutively after the first exploratory run exposed a transient missing `Page loaded` observation. The final local candidate is under `outputs/final-setup-20260818/`; SHA-256 values are recorded in its `SHA256SUMS.txt`.
+- No GitHub upload or commit was performed. Testing and outputs remain on the D drive.
+
+## VMware first-run observation checkpoint — 2026-08-18
+
+- VMware Workstation guest `D:/VMware/Windows 11 x64.vmx` was inspected as `AAA`; the closed-tail capture is under `outputs/vm-live-monitor/direct-20260818-200402`.
+- The closed-tail capture contained one active `dsh.exe` and one product-owned `node.exe`. Those product processes, probe Nodes, and temporary capture PowerShell processes were later terminated before the final Setup transfer; the current guest has no DSH/Node process from this test.
+- The read-only monitor scripts remain diagnostic tools only. The detached monitor was stopped before the final direct capture; do not describe it as continuously active.
+- A final Full Setup copy is already present at `C:/Users/AAA/Desktop/DeepSeek-Harness-Setup-Full-final.exe`. Its automated install was intentionally stopped at the user's request before any new DSH/Node process started; the remaining VMware install step is manual.
+
+## CONFIG save-then-launch sequencing checkpoint — 2026-08-18
+
+- `Save & Launch` now persists Desktop and HUB configuration, closes the CONFIG message loop, and launches the sibling application only after CONFIG has closed. It no longer starts the application from inside `SaveAndClose`.
+- The post-close handoff uses Windows Shell/Explorer so the new Desktop or HUB process is not attached to CONFIG's parent Job. The regular `Save` button remains save-and-close only.
+- `windows/launcher/smoke-first-run-handoff.ps1` now asserts that the Desktop process is absent immediately after `SaveAndClose(true)`, then launches it only after the form is disposed, verifies survival outside the outer Job, and checks for no access-denied startup.
+- Launcher build and the updated first-run handoff smoke pass at `windows/launcher/dist-save-then-launch-20260818`. Full/Lite Setup compilation and the local Setup smoke pass at `windows/setup/dist-save-then-launch-20260818`; Full is `343,313,584` bytes with SHA-256 `96beb88d5c1a70c0c55c4f745b525520f9038c9a907ae8d4a5b886a2c86d8388`, and Lite is `4,887,958` bytes with SHA-256 `6156328d91114bfc75f8401328457f9c81d7af334b7f6139a1e6ad6c0ab6e3fd`. No VMware desktop files were modified, and no GitHub upload or commit was performed.

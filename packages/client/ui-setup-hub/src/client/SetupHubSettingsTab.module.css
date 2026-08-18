@@ -2460,7 +2460,26 @@
 }
 
 .dshmkEvidenceRow span[data-verified='true'] { background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, var(--dsw-alias-bg-layer-2)); color: var(--dsw-alias-state-success-primary); }
-.dshmkCard .communityActions { margin: 0 18px; padding-block: 13px 16px; }
+.dshmkCard .communityActions {
+  flex-wrap: wrap;
+  align-items: stretch;
+  margin: 0 18px;
+  padding-block: 13px 16px;
+}
+
+.dshmkCard .communityActions a {
+  width: 100%;
+  margin-right: 0;
+}
+
+.dshmkCard .communityActions button {
+  min-width: 0;
+  flex: 1 1 120px;
+  justify-content: center;
+  line-height: 14px;
+  text-align: center;
+  white-space: normal;
+}
 
 .detailBackdrop,
 .setupBackdrop {
@@ -2480,6 +2499,7 @@
 .dshmkDetailSurface {
   display: flex;
   width: min(1120px, 100%);
+  box-sizing: border-box;
   min-width: 0;
   min-height: 0;
   flex-direction: column;
@@ -2491,7 +2511,7 @@
   animation: hub-detail-in 180ms cubic-bezier(.2, .8, .2, 1) both;
 }
 
-.dshmkDetailSurface[data-mode='side'] { width: min(720px, 72vw); }
+.dshmkDetailSurface[data-mode='side'] { width: min(720px, 100%); }
 .dshmkDetailSurface[data-mode='modal'] { max-height: min(860px, calc(100vh - 84px)); }
 .dshmkDetailSurface[data-mode='full'] { width: 100%; height: 100%; border: 0; border-radius: 0; box-shadow: none; }
 
@@ -2528,7 +2548,7 @@
 .dshmkDetailLead span { color: var(--dsw-alias-state-business-primary); font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .dshmkDetailLead h2 { margin: 5px 0 7px; font-size: 27px; line-height: 35px; }
 .dshmkDetailLead p { max-width: 760px; margin: 0; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 19px; }
-.dshmkDetailLead button { display: inline-flex; min-height: 42px; align-items: center; gap: 7px; border: 0; border-radius: 12px; padding: 8px 16px; background: var(--dsw-alias-button-primary-fill); color: var(--dsw-alias-label-primary-foreground); font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
+.dshmkDetailLead button { display: inline-flex; min-width: 0; max-width: 100%; min-height: 42px; align-items: center; justify-content: center; gap: 7px; border: 0; border-radius: 12px; padding: 8px 16px; background: var(--dsw-alias-button-primary-fill); color: var(--dsw-alias-label-primary-foreground); font: inherit; font-size: 11px; font-weight: 700; line-height: 16px; text-align: center; white-space: normal; cursor: pointer; }
 .dshmkDetailLead button:disabled { opacity: .48; cursor: not-allowed; }
 
 .dshmkMetricGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
@@ -2573,6 +2593,20 @@
 .originalDetail > a { position: absolute; right: 18px; bottom: 18px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 11px; padding: 8px 12px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-state-business-primary); box-shadow: var(--dsw-shadow-lv3); font-size: 10px; text-decoration: none; }
 
 .setupBackdrop { align-items: center; justify-content: center; padding: 28px; z-index: 120; }
+.componentProgressBackdrop { position: fixed; inset: 0; z-index: 145; display: grid; place-items: center; padding: 20px; background: color-mix(in srgb, var(--dsw-alias-bg-base) 76%, transparent); backdrop-filter: blur(12px); animation: hub-backdrop-in 140ms ease both; }
+.componentProgressCard { display: grid; width: min(520px, 100%); grid-template-columns: 52px minmax(0, 1fr); gap: 14px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 22px; padding: 22px; background: var(--dsw-alias-bg-layer-1); box-shadow: var(--dsw-shadow-lv3); animation: hub-detail-in 170ms cubic-bezier(.2, .8, .2, 1) both; }
+.componentProgressSpinner { display: grid; width: 48px; height: 48px; place-items: center; border-radius: 15px; background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, var(--dsw-alias-bg-layer-2)); }
+.componentProgressSpinner > span { width: 24px; height: 24px; border: 2px solid var(--dsw-alias-border-l2); border-top-color: var(--dsw-alias-state-business-primary); border-radius: 50%; animation: hub-spin .72s linear infinite; }
+.componentProgressCopy { min-width: 0; }
+.componentProgressCopy small { display: block; margin-bottom: 3px; color: var(--dsw-alias-state-business-primary); font-size: 9px; line-height: 15px; font-weight: 800; letter-spacing: .1em; }
+.componentProgressCopy h2 { margin: 0; color: var(--dsw-alias-label-primary); font-size: 17px; line-height: 25px; }
+.componentProgressCopy p { margin: 6px 0 0; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 18px; }
+.componentProgressCopy code { display: block; margin-top: 7px; overflow: hidden; color: var(--dsw-alias-label-tertiary); font-size: 9px; line-height: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.componentProgressBar { height: 8px; grid-column: 1 / -1; overflow: hidden; border-radius: 999px; background: var(--dsw-alias-bg-layer-3); }
+.componentProgressBar span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--dsw-alias-state-business-primary), var(--dsw-alias-state-success-primary)); transition: width 220ms ease; }
+.componentProgressCard footer { display: flex; min-width: 0; grid-column: 1 / -1; align-items: center; justify-content: space-between; gap: 14px; color: var(--dsw-alias-label-tertiary); font-size: 10px; line-height: 16px; }
+.componentProgressCard footer span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.componentProgressCard footer strong { flex: none; color: var(--dsw-alias-label-primary); font-size: 11px; }
 .restartPromptBackdrop { position: fixed; inset: 0; z-index: 150; display: grid; place-items: center; padding: 20px; background: color-mix(in srgb, var(--dsw-alias-bg-base) 72%, transparent); backdrop-filter: blur(12px); animation: hub-backdrop-in 140ms ease both; }
 .restartPrompt { display: grid; width: min(470px, 100%); grid-template-columns: 48px minmax(0, 1fr); gap: 14px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 20px; padding: 20px; background: var(--dsw-alias-bg-layer-1); box-shadow: var(--dsw-shadow-lv3); animation: hub-detail-in 170ms cubic-bezier(.2, .8, .2, 1) both; }
 .restartPromptIcon { display: grid; width: 46px; height: 46px; place-items: center; border-radius: 14px; background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, var(--dsw-alias-bg-layer-2)); color: var(--dsw-alias-state-business-primary); }
@@ -2689,11 +2723,13 @@
   .restartPrompt,
   .dshmkDetailSurface,
   .setupProgressSurface { animation: none; }
-  .restartTransition > span { animation-duration: 1.4s; }
+  .restartTransition > span,
+  .componentProgressSpinner > span { animation-duration: 1.4s; }
   .choiceMenu > button,
   .choicePopover,
   .filterPopover,
-  .setupProgressBar span { transition: none; }
+  .setupProgressBar span,
+  .componentProgressBar span { transition: none; }
   .setupDownloadBar span { transition: none; }
   .setupDownloadBar[data-indeterminate='true'] span { animation: none; transform: translateX(100%); }
 }

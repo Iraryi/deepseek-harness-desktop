@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "0.1.0-rc.5"
+  #define AppVersion "0.1.0-rc.6"
 #endif
 #ifndef AppNumericVersion
   #define AppNumericVersion "0.1.0.5"
@@ -91,7 +91,7 @@ UsePreviousTasks=yes
 CloseApplications=no
 RestartApplications=no
 SetupLogging=yes
-ChangesEnvironment=no
+ChangesEnvironment=yes
 ChangesAssociations=no
 DisableWelcomePage=no
 
@@ -346,6 +346,7 @@ Source: "{#LauncherDir}\Microsoft.Web.WebView2.Core.dll"; DestDir: "{app}"; Flag
 Source: "{#LauncherDir}\Microsoft.Web.WebView2.WinForms.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#LauncherDir}\WebView2Loader.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#LauncherDir}\community-registry.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#LauncherDir}\dshmk-catalog.json"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#LauncherDir}\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "install-runtime.ps1"; Flags: dontcopy noencryption
 Source: "seed-config.ps1"; Flags: dontcopy noencryption
@@ -363,12 +364,12 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Icons]
 Name: "{group}\DeepSeek Harness"; Filename: "{app}\dsh.exe"; WorkingDir: "{app}"
-Name: "{group}\DSH HUB"; Filename: "{app}\dsh-hub.exe"; WorkingDir: "{app}"
-Name: "{group}\DeepSeek Harness CONFIG"; Filename: "{app}\dsh-config.exe"; WorkingDir: "{app}"
+Name: "{group}\HUB"; Filename: "{app}\dsh-hub.exe"; WorkingDir: "{app}"
+Name: "{group}\CONFIG"; Filename: "{app}\dsh-config.exe"; WorkingDir: "{app}"
 Name: "{autodesktop}\DeepSeek Harness"; Filename: "{app}\dsh.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\dsh.exe"; Description: "{cm:LaunchAfterInstall}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\dsh-config.exe"; Parameters: "--first-run"; Description: "{cm:LaunchAfterInstall}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallRun]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\setup\stop-installed-processes.ps1"" -AppDirectory ""{app}"""; Flags: runhidden waituntilterminated; RunOnceId: "stop-installed-processes"
@@ -500,6 +501,14 @@ begin
   end;
 end;
 
+function NormalizePath(const Value: String): String;
+begin
+  Result := Value;
+  while (Length(Result) > 0) and
+    ((Result[Length(Result)] = '\\') or (Result[Length(Result)] = '/')) do
+    Delete(Result, Length(Result), 1);
+end;
+
 function CanWriteLocation(const Value: String): Boolean;
 var
   Directory: String;
@@ -555,9 +564,137 @@ begin
   if not FileExists(RuntimeRoot + '\tools\node\node.exe') then Exit;
   if not FileExists(RuntimeRoot + '\tools\node\npm.cmd') then Exit;
   if not FileExists(RuntimeRoot + '\tools\node\node_modules\npm\bin\npm-cli.js') then Exit;
+  if not FileExists(RuntimeRoot + '\tools\pnpm\pnpm.cmd') then Exit;
+  if not FileExists(RuntimeRoot + '\tools\pnpm\node_modules\pnpm\bin\pnpm.mjs') then Exit;
   if not FileExists(RuntimeRoot + '\node_modules\@deepseek-ai\dsh\lib\bin.js') then Exit;
   if not LoadStringFromFile(RuntimeRoot + '\.source-sha256', HashText) then Exit;
   Result := CompareText(Trim(HashText), '{#RuntimeSha256}') = 0;
+end;
+
+function SetEnvironmentVariable(const Name, Value: String): Boolean;
+  external 'SetEnvironmentVariableW@kernel32.dll stdcall';
+
+function SendMessageTimeout(hWnd, Msg, wParam, lParam, fuFlags, uTimeout: Integer; var lpdwResult: Integer): Integer;
+  external 'SendMessageTimeoutW@user32.dll stdcall';
+
+function UserEnvironmentValueExists(const Name: String; var Value: String): Boolean;
+begin
+  Result := RegQueryStringValue(HKCU, 'Environment', Name, Value);
+end;
+
+function PathListContains(const List, Entry: String): Boolean;
+var
+  StartIndex: Integer;
+  SeparatorIndex: Integer;
+  Candidate: String;
+begin
+  Result := False;
+  StartIndex := 1;
+  while StartIndex <= Length(List) + 1 do begin
+    SeparatorIndex := Pos(';', Copy(List, StartIndex, Length(List)));
+    if SeparatorIndex > 0 then SeparatorIndex := SeparatorIndex + StartIndex - 1;
+    if SeparatorIndex = 0 then SeparatorIndex := Length(List) + 1;
+    Candidate := Trim(Copy(List, StartIndex, SeparatorIndex - StartIndex));
+    if CompareText(NormalizePath(Candidate), NormalizePath(Entry)) = 0 then begin
+      Result := True;
+      Exit;
+    end;
+    StartIndex := SeparatorIndex + 1;
+  end;
+end;
+
+function RemovePathListEntry(const List, Entry: String): String;
+var
+  StartIndex: Integer;
+  SeparatorIndex: Integer;
+  Candidate: String;
+begin
+  Result := '';
+  StartIndex := 1;
+  while StartIndex <= Length(List) + 1 do begin
+    SeparatorIndex := Pos(';', Copy(List, StartIndex, Length(List)));
+    if SeparatorIndex > 0 then SeparatorIndex := SeparatorIndex + StartIndex - 1;
+    if SeparatorIndex = 0 then SeparatorIndex := Length(List) + 1;
+    Candidate := Trim(Copy(List, StartIndex, SeparatorIndex - StartIndex));
+    if (Candidate <> '') and (CompareText(NormalizePath(Candidate), NormalizePath(Entry)) <> 0) then begin
+      if Result <> '' then Result := Result + ';';
+      Result := Result + Candidate;
+    end;
+    StartIndex := SeparatorIndex + 1;
+  end;
+end;
+
+procedure BroadcastEnvironmentChange;
+var
+  ResultCode: Integer;
+begin
+  ResultCode := 0;
+  SendMessageTimeout($FFFF, $001A, 0, 0, $0002, 5000, ResultCode);
+end;
+
+procedure RegisterUserEnvironment;
+var
+  ExistingPath: String;
+  ProcessPath: String;
+  InstallPath: String;
+  DshHome: String;
+  ExistingDshHome: String;
+begin
+  InstallPath := NormalizePath(ExpandConstant('{app}'));
+  if not UserEnvironmentValueExists('Path', ExistingPath) then ExistingPath := '';
+  if not PathListContains(ExistingPath, InstallPath) then begin
+    if ExistingPath = '' then ExistingPath := InstallPath else ExistingPath := ExistingPath + ';' + InstallPath;
+    RegWriteExpandStringValue(HKCU, 'Environment', 'Path', ExistingPath);
+  end;
+  ProcessPath := GetEnv('PATH');
+  if not PathListContains(ProcessPath, InstallPath) then begin
+    if ProcessPath = '' then ProcessPath := InstallPath else ProcessPath := ProcessPath + ';' + InstallPath;
+  end;
+  SetEnvironmentVariable('Path', ProcessPath);
+
+  DshHome := ExpandConstant('{localappdata}\DeepSeekHarness\dsh');
+  if not UserEnvironmentValueExists('DSH_HOME', ExistingDshHome) or (Trim(ExistingDshHome) = '') then begin
+    RegWriteExpandStringValue(HKCU, 'Environment', 'DSH_HOME', DshHome);
+    SetEnvironmentVariable('DSH_HOME', DshHome);
+  end else begin
+    SetEnvironmentVariable('DSH_HOME', ExistingDshHome);
+  end;
+  BroadcastEnvironmentChange;
+end;
+
+procedure UnregisterUserEnvironment;
+var
+  ExistingPath: String;
+  ProcessPath: String;
+  ExistingDshHome: String;
+  InstallPath: String;
+  OwnedDshHome: String;
+begin
+  InstallPath := NormalizePath(ExpandConstant('{app}'));
+  if UserEnvironmentValueExists('Path', ExistingPath) then begin
+    ExistingPath := RemovePathListEntry(ExistingPath, InstallPath);
+    if ExistingPath = '' then RegDeleteValue(HKCU, 'Environment', 'Path')
+    else RegWriteExpandStringValue(HKCU, 'Environment', 'Path', ExistingPath);
+  end;
+  ProcessPath := RemovePathListEntry(GetEnv('PATH'), InstallPath);
+  SetEnvironmentVariable('Path', ProcessPath);
+  OwnedDshHome := ExpandConstant('{localappdata}\DeepSeekHarness\dsh');
+  if UserEnvironmentValueExists('DSH_HOME', ExistingDshHome) and
+    (CompareText(NormalizePath(ExistingDshHome), NormalizePath(OwnedDshHome)) = 0) then begin
+    RegDeleteValue(HKCU, 'Environment', 'DSH_HOME');
+    SetEnvironmentVariable('DSH_HOME', '');
+  end;
+  BroadcastEnvironmentChange;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then RegisterUserEnvironment;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then UnregisterUserEnvironment;
 end;
 
 procedure ApplyRecommendedSettings;

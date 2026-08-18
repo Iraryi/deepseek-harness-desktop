@@ -41,6 +41,9 @@ export interface WebUpgradeRoute {
   handler: (req: IncomingMessage, socket: Duplex, head: Buffer) => void | Promise<void>
 }
 
+/** One ordered index.html transform; asynchronous transforms may wait for application readiness. */
+export type WebIndexTransform = (html: string) => string | Promise<string>
+
 /** Gateway config: the listen address. */
 export interface Config {
   /** Listen host; the two supported values are loopback and all-interfaces. */
@@ -66,7 +69,7 @@ export class WebServer extends Service {
   private readonly prefixes = new Map<string, WebRoute>()
   private readonly upgrades = new Map<string, WebUpgradeRoute>()
   private readonly upgradedSockets = new Set<Duplex>()
-  private readonly indexTaps: ((html: string) => string)[] = []
+  private readonly indexTaps: WebIndexTransform[] = []
   private fallback: WebRoute['handler'] | undefined
   private server!: Server
   private listenedPort!: number
@@ -133,10 +136,10 @@ export class WebServer extends Service {
   /**
    * Register an index.html transform, applied by the fallback owner to every
    * index response ({@link applyIndexTaps}) in registration order.
-   * @param transform - pure html-to-html function.
+   * @param transform - ordered html-to-html function, optionally asynchronous.
    * @returns the disposer removing the transform.
    */
-  tapIndex(transform: (html: string) => string): () => void {
+  tapIndex(transform: WebIndexTransform): () => void {
     this.indexTaps.push(transform)
     return () => {
       const at = this.indexTaps.indexOf(transform)
@@ -254,11 +257,11 @@ export class WebServer extends Service {
    * Run an index.html body through the registered taps in registration order
    * — called by the fallback owner on every index response it renders.
    * @param html - the raw index.html body.
-   * @returns the transformed body.
+   * @returns the transformed body after every tap settles in registration order.
    */
-  applyIndexTaps(html: string): string {
+  async applyIndexTaps(html: string): Promise<string> {
     let out = html
-    for (const transform of this.indexTaps) out = transform(out)
+    for (const transform of this.indexTaps) out = await transform(out)
     return out
   }
 }

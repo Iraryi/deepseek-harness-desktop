@@ -48,11 +48,15 @@ try {
     $node = Join-Path $extractPath $manifest.node
     $npm = Join-Path $extractPath $manifest.packageManager.command
     $npmCli = Join-Path $extractPath $manifest.packageManager.cli
+    $pnpm = Join-Path $extractPath $manifest.packageManager.pnpmCommand
+    $pnpmCli = Join-Path $extractPath $manifest.packageManager.pnpmCli
     $entry = Join-Path $extractPath $manifest.entry
     $resolver = Join-Path $extractPath $manifest.resolver
     if (-not (Test-Path $node)) { throw "Bundled node is missing: $node" }
     if (-not (Test-Path $npm)) { throw "Bundled npm command is missing: $npm" }
     if (-not (Test-Path $npmCli)) { throw "Bundled npm CLI is missing: $npmCli" }
+    if (-not (Test-Path $pnpm)) { throw "Bundled pnpm command is missing: $pnpm" }
+    if (-not (Test-Path $pnpmCli)) { throw "Bundled pnpm CLI is missing: $pnpmCli" }
     if (-not (Test-Path $entry)) { throw "Runtime entry is missing: $entry" }
     if (-not (Test-Path $resolver)) { throw "Runtime resolver is missing: $resolver" }
 

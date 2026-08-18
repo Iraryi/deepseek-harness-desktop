@@ -103,6 +103,8 @@ function Assert-Runtime([string]$Root) {
     $node = [IO.Path]::GetFullPath((Join-Path $Root $manifest.node))
     $npm = [IO.Path]::GetFullPath((Join-Path $Root $manifest.packageManager.command))
     $npmCli = [IO.Path]::GetFullPath((Join-Path $Root $manifest.packageManager.cli))
+    $pnpm = [IO.Path]::GetFullPath((Join-Path $Root $manifest.packageManager.pnpmCommand))
+    $pnpmCli = [IO.Path]::GetFullPath((Join-Path $Root $manifest.packageManager.pnpmCli))
     $resolver = [IO.Path]::GetFullPath((Join-Path $Root $manifest.resolver))
     $prefix = [IO.Path]::GetFullPath($Root) + [IO.Path]::DirectorySeparatorChar
     if (-not $entry.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path $entry)) {
@@ -116,6 +118,12 @@ function Assert-Runtime([string]$Root) {
     }
     if (-not $npmCli.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path $npmCli)) {
         throw "Bundled npm CLI is invalid or missing: $npmCli"
+    }
+    if (-not $pnpm.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path $pnpm)) {
+        throw "Bundled pnpm command is invalid or missing: $pnpm"
+    }
+    if (-not $pnpmCli.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path $pnpmCli)) {
+        throw "Bundled pnpm CLI is invalid or missing: $pnpmCli"
     }
     if (-not $resolver.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path $resolver)) {
         throw "Runtime resolver is invalid or missing: $resolver"
@@ -137,7 +145,11 @@ function Assert-Runtime([string]$Root) {
     if ($LASTEXITCODE -ne 0 -or $npmVersion -notmatch '^\d+\.\d+\.\d+') {
         throw "Bundled npm did not report a valid version: $npmVersion"
     }
-    return [pscustomobject]@{ Manifest = $manifest; NodeVersion = $nodeVersion; NpmVersion = $npmVersion }
+    $pnpmVersion = (& $node $pnpmCli --version).Trim()
+    if ($LASTEXITCODE -ne 0 -or $pnpmVersion -notmatch '^\d+\.\d+\.\d+') {
+        throw "Bundled pnpm did not report a valid version: $pnpmVersion"
+    }
+    return [pscustomobject]@{ Manifest = $manifest; NodeVersion = $nodeVersion; NpmVersion = $npmVersion; PnpmVersion = $pnpmVersion }
 }
 
 function Resolve-NodeForSourceBuild {
